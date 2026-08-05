@@ -524,7 +524,7 @@ paths:
   /notifications/ack:
     post:
       operationId: ackNotifications
-      summary: Conferma la ricezione delle notifiche (le marca come lette)
+      summary: Conferma la ricezione delle notifiche (scope irec.write)
       parameters:
         - $ref: '#/components/parameters/CorrelationId'
       requestBody:
@@ -546,7 +546,13 @@ paths:
                 properties:
                   marcate: { type: integer }
         '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/EntitlementError' }
+        '403':
+          description: >-
+            Autorizzazione insufficiente (`entitlement_missing`,
+            `scope_missing`: l'ack è una mutazione e richiede `irec.write`).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   # Gli endpoint operativi vivono alla root, fuori dal prefisso /v1
   # (server override per-path).
@@ -753,6 +759,7 @@ components:
         recuperato: { type: string, format: decimal }
         da_recuperare: { type: string, format: decimal }
         passato_a_recupero: { type: string, format: decimal }
+        percentuale_recuperato: { type: integer }
         azioni_principali:
           type: array
           items:

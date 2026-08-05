@@ -1,8 +1,10 @@
 """Composizione del brief giornaliero (addendum §5.2). Dominio puro.
 
-Tono ibrido: apre sereno, il positivo per primo (recuperato su affidato),
-poi offre le azioni urgenti come invito, non come allarme. Tetto rigido:
-massimo 2-3 azioni; se ce ne sono di più, "e altre N".
+Il brief espone solo numeri e conteggi: il *tono* (aprire sereno, positivo
+per primo, azioni come invito e non come allarme) lo mette l'LLM di Mind a
+partire da questi dati. Qui c'è la struttura: KPI, la quota già recuperata
+e le azioni ordinate per priorità con un tetto rigido di 2-3, oltre il
+quale il resto confluisce in "e altre N".
 """
 
 from dataclasses import dataclass
@@ -36,9 +38,12 @@ class Brief:
     passato_a_recupero: str
     azioni_principali: tuple[VoceBrief, ...]
     altre_azioni: int
+    # Quota di portafoglio già recuperata (0-100): il "positivo per primo".
+    percentuale_recuperato: int
 
 
-def _percentuale_recuperato(affidato: Decimal, recuperato: Decimal) -> int:
+def percentuale_recuperato(affidato: Decimal, recuperato: Decimal) -> int:
+    """Quota di portafoglio già recuperata (0-100)."""
     if affidato <= 0:
         return 0
     return int((recuperato / affidato) * 100)
@@ -70,9 +75,5 @@ def componi_brief(
         passato_a_recupero=str(passato_a_recupero),
         azioni_principali=principali,
         altre_azioni=altre,
+        percentuale_recuperato=percentuale_recuperato(affidato, recuperato),
     )
-
-
-def percentuale_recuperato(affidato: Decimal, recuperato: Decimal) -> int:
-    """Quota di portafoglio già recuperata, per il "positivo per primo"."""
-    return _percentuale_recuperato(affidato, recuperato)

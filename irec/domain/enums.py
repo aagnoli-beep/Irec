@@ -72,13 +72,18 @@ class StatoRun(StrEnum):
 
 class TipoNotifica(StrEnum):
     """Notifiche proattive verso l'utente (addendum §6.4), in ordine di
-    priorità per il brief giornaliero."""
+    priorità per il brief giornaliero.
+
+    Emessi in M6: ESCALATION_IMMINENTE, CONSENSO_PSD2, COLLEGAMENTO_ADE.
+    Previsti ma non ancora generati: ESCALATION_ESEGUITA (già coperta dalla
+    mail di escalation, notifica in-app da valutare) e DATO_IN_RITARDO
+    (richiede il tracciamento dell'SLA AdE — MS reale, M8)."""
 
     ESCALATION_IMMINENTE = "escalation_imminente"  # T+44: domani parte
     CONSENSO_PSD2 = "consenso_psd2"  # da riautorizzare
     COLLEGAMENTO_ADE = "collegamento_ade"  # delega non attiva
     ESCALATION_ESEGUITA = "escalation_eseguita"  # passata a Recupero Crediti
-    DATO_IN_RITARDO = "dato_in_ritardo"  # sincronizzazione oltre SLA
+    DATO_IN_RITARDO = "dato_in_ritardo"  # sincronizzazione oltre SLA (M8)
 
 
 # Ordine con cui le notifiche diventano "azioni proposte" nel brief.

@@ -1,21 +1,18 @@
 """Rotte proattive /v1 (M6): brief giornaliero e notifiche in polling."""
 
 from datetime import datetime
-from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from pydantic import BaseModel
 
 from irec.adapters.db.models import Notifica
+from irec.api.azioni import WriteContext
 from irec.api.deps import RepositoryDep
-from irec.auth.context import CallContext, get_call_context
 from irec.domain.calendario import assumi_utc
 from irec.services.notifiche import marca_lette, notifiche_da_consegnare
 from irec.services.reporting import componi_brief_giornaliero
 
 router = APIRouter(prefix="/v1")
-
-SCOPE_WRITE = "irec.write"
 
 
 class VoceBriefOut(BaseModel):
@@ -28,6 +25,7 @@ class BriefOut(BaseModel):
     recuperato: str
     da_recuperare: str
     passato_a_recupero: str
+    percentuale_recuperato: int
     azioni_principali: list[VoceBriefOut]
     altre_azioni: int
 
@@ -63,6 +61,7 @@ def get_brief(repo: RepositoryDep) -> BriefOut:
         recuperato=brief.recuperato,
         da_recuperare=brief.da_recuperare,
         passato_a_recupero=brief.passato_a_recupero,
+        percentuale_recuperato=brief.percentuale_recuperato,
         azioni_principali=[
             VoceBriefOut(tipo=voce.tipo.value, quante=voce.quante)
             for voce in brief.azioni_principali
@@ -82,12 +81,10 @@ def get_notifications(repo: RepositoryDep) -> NotificheOut:
 
 
 @router.post("/notifications/ack", response_model=AckOut)
-def ack_notifications(
-    body: AckIn,
-    repo: RepositoryDep,
-    ctx: Annotated[CallContext, Depends(get_call_context)],
-) -> AckOut:
-    """Marca come lette le notifiche indicate. Conferma di ricezione."""
+def ack_notifications(body: AckIn, repo: RepositoryDep, ctx: WriteContext) -> AckOut:
+    """Marca come lette le notifiche indicate. Conferma di ricezione.
+
+    È una mutazione: richiede lo scope `irec.write` firmato da Mind."""
     return AckOut(marcate=marca_lette(repo, body.ids))
 
 

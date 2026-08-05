@@ -3,6 +3,9 @@
 from datetime import date, timedelta
 from decimal import Decimal
 
+import pytest
+
+from irec.adapters.db.models import Notifica
 from irec.adapters.db.repository import TenantRepository
 from irec.adapters.db.session import session_scope
 from irec.adapters.mock import (
@@ -16,6 +19,7 @@ from irec.domain.enums import StatoFattura, TipoNotifica
 from irec.domain.porte import CollegamentoEsterno, StatoCollegamento
 from irec.services.invii import MotoreInvii
 from irec.services.notifiche import (
+    EsitoEmissione,
     conteggio_per_tipo,
     emetti,
     marca_lette,
@@ -56,24 +60,60 @@ class TestEmissioneEDeduplica:
     def test_emette_una_notifica(self, session_factory):
         with session_scope(session_factory) as session:
             repo = TenantRepository(session, TENANT)
-            n = emetti(repo, TipoNotifica.DATO_IN_RITARDO, "rif-1")
-            assert n is not None
+            assert (
+                emetti(repo, TipoNotifica.DATO_IN_RITARDO, "rif-1")
+                is EsitoEmissione.CREATA
+            )
 
     def test_deduplica_stessa_chiave(self, session_factory):
         with session_scope(session_factory) as session:
             repo = TenantRepository(session, TENANT)
             emetti(repo, TipoNotifica.DATO_IN_RITARDO, "rif-1")
             repo.flush()
-            assert emetti(repo, TipoNotifica.DATO_IN_RITARDO, "rif-1") is None
+            assert (
+                emetti(repo, TipoNotifica.DATO_IN_RITARDO, "rif-1")
+                is EsitoEmissione.GIA_IN_CODA
+            )
 
-    def test_ri_emette_dopo_che_e_stata_letta(self, session_factory):
+    def test_ri_emette_dopo_che_e_stata_letta_resuscita_una_sola_riga(
+        self, session_factory
+    ):
         with session_scope(session_factory) as session:
             repo = TenantRepository(session, TENANT)
-            n = emetti(repo, TipoNotifica.DATO_IN_RITARDO, "rif-1")
+            emetti(repo, TipoNotifica.DATO_IN_RITARDO, "rif-1")
             repo.flush()
+            n = repo.list(Notifica)[0]
             marca_lette(repo, [n.id])
-            # La situazione si ripresenta: nuova notifica.
-            assert emetti(repo, TipoNotifica.DATO_IN_RITARDO, "rif-1") is not None
+            # La situazione si ripresenta: la stessa riga torna in coda.
+            assert (
+                emetti(repo, TipoNotifica.DATO_IN_RITARDO, "rif-1")
+                is EsitoEmissione.RESUSCITATA
+            )
+            repo.flush()
+            righe = repo.list(Notifica)
+            assert len(righe) == 1  # una sola riga per chiave
+            assert righe[0].letta_at is None
+
+    def test_chiavi_diverse_coesistono(self, session_factory):
+        with session_scope(session_factory) as session:
+            repo = TenantRepository(session, TENANT)
+            emetti(repo, TipoNotifica.ESCALATION_IMMINENTE, "fatt-1")
+            emetti(repo, TipoNotifica.CONSENSO_PSD2, "consenso_psd2")
+            repo.flush()
+            assert len(notifiche_da_consegnare(repo)) == 2
+
+    def test_ack_di_una_non_tocca_le_altre(self, session_factory):
+        with session_scope(session_factory) as session:
+            repo = TenantRepository(session, TENANT)
+            emetti(repo, TipoNotifica.ESCALATION_IMMINENTE, "fatt-1")
+            emetti(repo, TipoNotifica.CONSENSO_PSD2, "consenso_psd2")
+            repo.flush()
+            prima = notifiche_da_consegnare(repo)
+            marca_lette(repo, [prima[0].id])
+            repo.flush()
+            rimaste = notifiche_da_consegnare(repo)
+            assert len(rimaste) == 1
+            assert rimaste[0].id != prima[0].id
 
 
 class TestCollegamenti:
@@ -138,6 +178,37 @@ class TestGenerazioneNelCiclo:
         with session_scope(session_factory) as session:
             assert len(notifiche_da_consegnare(TenantRepository(session, TENANT))) == 1
 
+    @pytest.mark.parametrize("giorni", [43, 45])
+    def test_nessun_preavviso_fuori_da_t44(self, session_factory, giorni):
+        _fattura_a_giorni(session_factory, giorni)
+        with session_scope(session_factory) as session:
+            esito = self._ciclo(ScenarioTenant()).esegui(
+                TenantRepository(session, TENANT)
+            )
+        assert esito.notifiche_generate == 0
+
+    def test_collegamento_risolto_nel_ciclo_successivo(self, session_factory):
+        _fattura_a_giorni(session_factory, 10)
+        caduto = ScenarioTenant(
+            consenso_psd2=CollegamentoEsterno(stato=StatoCollegamento.SCADUTO)
+        )
+        with session_scope(session_factory) as session:
+            self._ciclo(caduto).esegui(TenantRepository(session, TENANT))
+        with session_scope(session_factory) as session:
+            assert any(
+                n.tipo is TipoNotifica.CONSENSO_PSD2
+                for n in notifiche_da_consegnare(TenantRepository(session, TENANT))
+            )
+        # Ciclo successivo con consenso tornato attivo: la notifica si risolve.
+        with session_scope(session_factory) as session:
+            self._ciclo(ScenarioTenant()).esegui(TenantRepository(session, TENANT))
+        with session_scope(session_factory) as session:
+            tipi = {
+                n.tipo
+                for n in notifiche_da_consegnare(TenantRepository(session, TENANT))
+            }
+            assert TipoNotifica.CONSENSO_PSD2 not in tipi
+
     def test_collegamento_caduto_nel_ciclo(self, session_factory):
         _fattura_a_giorni(session_factory, 10)
         scenario = ScenarioTenant(
@@ -182,17 +253,69 @@ class TestApiProattivo:
 
     def test_notifications_e_ack(self, app, client, make_token, session_factory):
         self._prepara(session_factory)
-        hdr = {"Authorization": f"Bearer {make_token()}"}
-        items = client.get("/v1/notifications", headers=hdr).json()["items"]
+        read = {"Authorization": f"Bearer {make_token()}"}
+        write = {"Authorization": f"Bearer {make_token(scope='irec.write')}"}
+        items = client.get("/v1/notifications", headers=read).json()["items"]
         assert len(items) == 1
         nid = items[0]["id"]
 
         ack = client.post(
-            "/v1/notifications/ack", headers=hdr, json={"ids": [nid]}
+            "/v1/notifications/ack", headers=write, json={"ids": [nid]}
         ).json()
         assert ack["marcate"] == 1
         # Dopo l'ack, la coda è vuota.
-        assert client.get("/v1/notifications", headers=hdr).json()["items"] == []
+        assert client.get("/v1/notifications", headers=read).json()["items"] == []
+
+    def test_ack_richiede_scope_write(self, app, client, make_token, session_factory):
+        self._prepara(session_factory)
+        r = client.post(
+            "/v1/notifications/ack",
+            headers={"Authorization": f"Bearer {make_token(scope='irec.read')}"},
+            json={"ids": ["qualunque"]},
+        )
+        assert r.status_code == 403
+        assert r.json()["code"] == "scope_missing"
 
     def test_brief_senza_token_401(self, app, client, session_factory):
         assert client.get("/v1/brief").status_code == 401
+
+    def test_isolamento_tenant_notifiche(
+        self, app, client, make_token, session_factory
+    ):
+        """Un tenant non vede né può marcare le notifiche di un altro."""
+        with session_scope(session_factory) as session:
+            emetti(
+                TenantRepository(session, "tenant-altro"),
+                TipoNotifica.CONSENSO_PSD2,
+                "consenso_psd2",
+            )
+        with session_scope(session_factory) as session:
+            emetti(
+                TenantRepository(session, TENANT),
+                TipoNotifica.COLLEGAMENTO_ADE,
+                "collegamento_ade",
+            )
+
+        read = {"Authorization": f"Bearer {make_token()}"}
+        write = {"Authorization": f"Bearer {make_token(scope='irec.write')}"}
+        items = client.get("/v1/notifications", headers=read).json()["items"]
+        # Solo la notifica del proprio tenant.
+        assert len(items) == 1
+        assert items[0]["tipo"] == "collegamento_ade"
+
+        # L'id della notifica altrui.
+        with session_scope(session_factory) as session:
+            altrui = notifiche_da_consegnare(
+                TenantRepository(session, "tenant-altro")
+            )[0].id
+
+        ack = client.post(
+            "/v1/notifications/ack", headers=write, json={"ids": [altrui]}
+        ).json()
+        assert ack["marcate"] == 0  # id altrui = no-op
+        # La notifica dell'altro tenant è ancora viva.
+        with session_scope(session_factory) as session:
+            assert (
+                len(notifiche_da_consegnare(TenantRepository(session, "tenant-altro")))
+                == 1
+            )

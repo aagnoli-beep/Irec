@@ -20,6 +20,7 @@ from enum import StrEnum
 from sqlalchemy import (
     JSON,
     CheckConstraint,
+    ColumnElement,
     Date,
     DateTime,
     Enum,
@@ -375,6 +376,11 @@ class Notifica(TenantScoped, Base):
     chiave: Mapped[str] = mapped_column(String(128))
     dettaglio: Mapped[str | None] = mapped_column(String(255))
     letta_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    @classmethod
+    def viva(cls) -> ColumnElement[bool]:
+        """Criterio "non ancora letta", spinto al DB (usa ix_notifica_tenant_letta)."""
+        return cls.letta_at.is_(None)
 
 
 class AuditLog(TenantScoped, Base):

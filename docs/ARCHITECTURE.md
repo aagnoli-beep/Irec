@@ -53,7 +53,13 @@ microservizi esterni che orchestra. IREC possiede l'automazione a valle
 
 - Lato Mind: timeout 5–10s + circuit breaker + fallback in chat, mai un 500.
 - Lato IREC: `/health` e `/ready`; run lunghe **async** (`202 { run_id }` +
-  poll o webhook); **`Idempotency-Key`** su tutte le mutazioni.
+  poll); **`Idempotency-Key`** su tutte le mutazioni.
+- **Notifiche proattive in polling** (M6): Mind legge `GET /v1/notifications`
+  e conferma con `POST /v1/notifications/ack`. Il polling mantiene la
+  dipendenza unidirezionale Mind→IREC (se IREC cade è il poll a fallire, e
+  scatta il circuit breaker di Mind): un webhook invertirebbe la dipendenza
+  e obbligherebbe IREC a conoscere un endpoint di Mind. Il webhook resta da
+  concordare col team Mind (punto aperto).
 - `x-correlation-id`: ricevuto da Mind, ri-emesso in ogni log.
 - Log JSON strutturati **senza PII** (`tenant_id` troncato).
 
