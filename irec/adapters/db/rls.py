@@ -22,28 +22,48 @@ from irec.adapters.db.models import Base
 
 RLS_TENANT_SETTING = "irec.tenant_id"
 
-_POLICY = "tenant_isolation"
+# Nome della policy: usato anche dal downgrade delle migrazioni.
+RLS_POLICY_NAME = "tenant_isolation"
 
 
-def rls_statements() -> list[str]:
-    """Gli statement che attivano la RLS su ogni tabella dello schema.
+def rls_statements_for(table_names: list[str] | None = None) -> list[str]:
+    """Gli statement che attivano la RLS sulle tabelle indicate.
 
-    Usati sia dalla migrazione sia dai test: un'unica fonte, così una
-    tabella nuova non può ricevere la policy in un posto e non nell'altro.
+    Con `None` copre tutte le tabelle dei modelli correnti (uso: test e
+    `enable_rls`). Le MIGRAZIONI devono invece passare la loro lista
+    congelata: una migrazione è uno snapshot storico e non può dipendere
+    dai modelli "vivi" — su un DB vergine fallirebbe sulle tabelle nate
+    dopo di lei, e su un DB migrato lascerebbe scoperte le nuove.
     """
+    if table_names is None:
+        table_names = list(Base.metadata.tables)
     statements: list[str] = []
-    for nome_tabella in Base.metadata.tables:
+    for table_name in table_names:
         statements.extend(
             [
-                f"ALTER TABLE {nome_tabella} ENABLE ROW LEVEL SECURITY",
-                f"ALTER TABLE {nome_tabella} FORCE ROW LEVEL SECURITY",
-                f"DROP POLICY IF EXISTS {_POLICY} ON {nome_tabella}",
+                f"ALTER TABLE {table_name} ENABLE ROW LEVEL SECURITY",
+                f"ALTER TABLE {table_name} FORCE ROW LEVEL SECURITY",
+                f"DROP POLICY IF EXISTS {RLS_POLICY_NAME} ON {table_name}",
                 (
-                    f"CREATE POLICY {_POLICY} ON {nome_tabella} "
+                    f"CREATE POLICY {RLS_POLICY_NAME} ON {table_name} "
                     f"USING (tenant_id = current_setting('{RLS_TENANT_SETTING}', true)) "
                     f"WITH CHECK "
                     f"(tenant_id = current_setting('{RLS_TENANT_SETTING}', true))"
                 ),
+            ]
+        )
+    return statements
+
+
+def rls_drop_statements_for(table_names: list[str]) -> list[str]:
+    """Statement di disattivazione, per i downgrade delle migrazioni."""
+    statements: list[str] = []
+    for table_name in table_names:
+        statements.extend(
+            [
+                f"DROP POLICY IF EXISTS {RLS_POLICY_NAME} ON {table_name}",
+                f"ALTER TABLE {table_name} NO FORCE ROW LEVEL SECURITY",
+                f"ALTER TABLE {table_name} DISABLE ROW LEVEL SECURITY",
             ]
         )
     return statements
@@ -54,5 +74,5 @@ def enable_rls(engine: Engine) -> None:
     if engine.dialect.name != "postgresql":
         return
     with engine.begin() as connection:
-        for statement in rls_statements():
+        for statement in rls_statements_for(None):
             connection.execute(text(statement))

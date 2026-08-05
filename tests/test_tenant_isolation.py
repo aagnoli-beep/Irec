@@ -133,6 +133,32 @@ class TestScrittura:
             with pytest.raises(ValueError, match="tenant_id obbligatorio"):
                 TenantRepository(session, "")
 
+    def test_una_sessione_un_tenant(self, session_factory):
+        """Un secondo repository con tenant diverso sulla stessa sessione è
+        un errore di programmazione, non un degrado silenzioso."""
+        with session_scope(session_factory) as session:
+            TenantRepository(session, "tenant-a")
+            with pytest.raises(TenantViolation, match="un tenant"):
+                TenantRepository(session, "tenant-b")
+
+    def test_furto_di_riga_verso_il_proprio_tenant_e_rifiutato(self, session_factory):
+        """Il guard sullo storico: una riga di tenant-a riassegnata a
+        tenant-b DA una sessione tenant-b supera il primo check (il valore
+        nuovo coincide con l'atteso) e deve cadere sul secondo."""
+        ids_a = popola_tenant(session_factory, "tenant-a")
+
+        with pytest.raises(TenantViolation, match="non è modificabile"):
+            with session_scope(session_factory) as session:
+                TenantRepository(session, "tenant-b")
+                # Accesso raw deliberato: simula il codice scritto male che
+                # il guard deve fermare.
+                mandante = session.get(Mandante, ids_a["mandante"])
+                mandante.tenant_id = "tenant-b"
+                session.flush()
+
+        with session_scope(session_factory) as session:
+            assert TenantRepository(session, "tenant-b").list(Mandante) == []
+
 
 class TestCancellazioneGdpr:
     @pytest.mark.parametrize("model", TUTTI_I_MODELLI)
@@ -143,8 +169,11 @@ class TestCancellazioneGdpr:
         with session_scope(session_factory) as session:
             TenantRepository(session, "tenant-a").delete_tenant_data()
 
+        # Una sessione = un tenant: la verifica dei due tenant usa
+        # sessioni separate.
         with session_scope(session_factory) as session:
             assert TenantRepository(session, "tenant-a").list(model) == []
+        with session_scope(session_factory) as session:
             assert len(TenantRepository(session, "tenant-b").list(model)) == 1
 
     def test_conteggi_coprono_tutte_le_tabelle(self, session_factory):
@@ -170,3 +199,29 @@ class TestCancellazioneGdpr:
         popola_tenant(session_factory, "tenant-a")
         with session_scope(session_factory) as session:
             assert len(TenantRepository(session, "tenant-a").list(Mandante)) == 1
+
+
+class TestAuditTrail:
+    def test_log_event_scrive_nel_tenant_del_repository(self, session_factory):
+        from irec.domain.enums import TipoEvento
+
+        with session_scope(session_factory) as session:
+            TenantRepository(session, "tenant-a").log_event(
+                TipoEvento.TRANSIZIONE_STATO,
+                entita="fattura",
+                entita_id="fatt-1",
+                stato_precedente="gestione",
+                stato_successivo="saldata",
+                operatore="user-123",
+                correlation_id="corr-1",
+            )
+
+        with session_scope(session_factory) as session:
+            eventi = TenantRepository(session, "tenant-a").list(AuditLog)
+            assert len(eventi) == 1
+            evento = eventi[0]
+            assert evento.tenant_id == "tenant-a"
+            assert evento.stato_successivo == "saldata"
+            assert evento.correlation_id == "corr-1"
+        with session_scope(session_factory) as session:
+            assert TenantRepository(session, "tenant-b").list(AuditLog) == []

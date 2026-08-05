@@ -5,7 +5,7 @@ le fatture nel cassetto e i movimenti in banca. I mock riproducono i
 comportamenti reali che il ciclo giornaliero deve saper gestire:
 
 - collegamento AdE non attivo / consenso PSD2 scaduto → `ErroreCollegamento`;
-- latenza SDI: una fattura emessa da meno di N giorni lavorativi non è
+- latenza SDI: una fattura emessa da meno di N giorni di calendario non è
   ancora visibile nel cassetto (SLA AdE 2-3 giorni, PRD Cassetto §3);
 - pagamenti parziali, un movimento che copre più fatture (FIFO per
   scadenza), movimenti non abbinabili, movimenti duplicati nello stesso
@@ -107,9 +107,18 @@ class MockRiconciliatore:
 
     Logica volutamente semplice ma con la stessa forma dell'output reale:
     abbina per P.IVA della controparte e alloca l'importo del movimento
-    alle fatture aperte di quel debitore in ordine di scadenza (FIFO).
-    Un movimento senza P.IVA abbinabile resta non riconciliato; un
-    movimento duplicato nello stesso lotto è processato una volta sola.
+    alle fatture aperte di quel debitore in ordine di scadenza (FIFO,
+    tie-break sul numero fattura per determinismo).
+
+    Regole di bordo, pinnate dai test:
+    - un movimento senza P.IVA abbinabile o con importo <= 0 resta
+      non riconciliato (un importo negativo è uno storno, non un incasso);
+    - un movimento duplicato (stesso id) nello stesso lotto è processato
+      una volta sola, qualunque sia il suo contenuto;
+    - una fattura con importo <= 0 non ha nulla da incassare: compare in
+      `fatture_da_pagare` così non svanisce dall'esito (invariante: ogni
+      fattura in input è nell'esito, o pagata per intero o da pagare);
+    - vale l'assunzione delle porte: `(piva_cf_debitore, numero)` univoco.
     """
 
     def riconcilia(
@@ -164,6 +173,7 @@ class MockRiconciliatore:
             fattura
             for fattura in fatture
             if residui[(fattura.piva_cf_debitore, fattura.numero)] > 0
+            or fattura.importo <= 0
         )
         return EsitoRiconciliazione(
             pagamenti=tuple(pagamenti),

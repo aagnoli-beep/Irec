@@ -40,9 +40,12 @@ Le variabili possono essere fornite anche via file `.env` (non committato).
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/pytest          # test
-.venv/bin/ruff check .    # lint
+.venv/bin/ruff check .    # lint (con regola di layering TID251)
+.venv/bin/mypy            # type check (strict, come in CI)
 docker compose up         # servizio + Postgres locale
 ```
+
+La CI esegue anche la coverage con soglia: `pytest --cov=irec --cov-fail-under=85`.
 
 I test di persistenza girano sia su SQLite (veloce) sia su Postgres, se
 `IREC_TEST_DATABASE_URL` è configurata — in CI lo è sempre. Per eseguirli

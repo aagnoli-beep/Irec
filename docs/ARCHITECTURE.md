@@ -117,8 +117,9 @@ un'entità persistita: è generato al momento dai dati esistenti (M6).
 Stati fattura: **Gestione, Pausa, Saldata, Insoluto** (+ etichetta visuale
 "Scadenza" pre-scadenza, punto aperto A del PRD).
 
-**Come è garantito l'isolamento (deciso in M1).** Tre livelli indipendenti,
-così la garanzia non dipende dalla disciplina di chi scrive il codice:
+**Come è garantito l'isolamento (livelli 1-3 decisi in M1, il 4 in M2).**
+Quattro livelli indipendenti, così la garanzia non dipende dalla disciplina
+di chi scrive il codice:
 
 1. **`TenantRepository`** (`irec/adapters/db/repository.py`): unico accesso ai
    dati, filtra ogni lettura, scrittura e cancellazione per il `tenant_id` del
@@ -142,15 +143,6 @@ da `irec/adapters/db/`: il layering è verificato dalla CI, non affidato alla
 disciplina. `user_id` per tabella non è stato introdotto: in MVP ogni mandante
 ha un solo account operativo (PRD Gestione utenze §5).
 
-### Convenzione di naming
-
-Il **dominio finanziario è in italiano** (`fattura`, `sollecito`, `residuo`,
-`mandante`, `posizione`: i termini del PRD, che non hanno traduzione senza
-perdita); l'**infrastruttura è in inglese** (`select`, `add`, `flush`,
-`delete_tenant_data`, `log_event`, `_find_key`). Nei payload API: campi di
-dominio in italiano, campi di protocollo/envelope in inglese (`run_id`,
-`status`, `error`).
-
 - Audit trail: ogni comunicazione (data/ora, canale, operatore, esito recapito),
   ogni transizione di stato, ogni azione manuale. Storico immutabile.
 - Idempotenza pagamenti: `chiave_idempotenza` univoca per tenant, così il
@@ -158,6 +150,16 @@ dominio in italiano, campi di protocollo/envelope in inglese (`run_id`,
   vengono contati due volte.
 - Importi `Numeric(14,2)` e quantizzazione al centesimo nel dominio: mai float.
 - GDPR: `DELETE /v1/tenant` (richiede scope dedicato), FK con cascade.
+
+### Convenzione di naming
+
+Il **dominio finanziario è in italiano** (`fattura`, `sollecito`, `residuo`,
+`mandante`, `posizione`: i termini del PRD, che non hanno traduzione senza
+perdita); l'**infrastruttura è in inglese**, helper privati inclusi
+(`select`, `add`, `flush`, `delete_tenant_data`, `log_event`, `_find_key`,
+`_set_rls_tenant`, `_not_ready_reason`). Nei payload API: campi di dominio
+in italiano, campi di protocollo/envelope in inglese (`run_id`, `status`,
+`error`).
 
 ## 7. Cosa NON fare (lista nera dal brief)
 

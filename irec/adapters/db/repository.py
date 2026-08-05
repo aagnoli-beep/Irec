@@ -44,7 +44,7 @@ TENANT_SESSION_KEY = "irec_tenant_id"
 
 # Ordine di cancellazione GDPR: dalle foglie alla radice, così le FK
 # reggono anche sui database senza ON DELETE CASCADE attivo.
-_ORDINE_CANCELLAZIONE: tuple[type[TenantScoped], ...] = (
+_DELETION_ORDER: tuple[type[TenantScoped], ...] = (
     AuditLog,
     Pagamento,
     Comunicazione,
@@ -58,11 +58,11 @@ _ORDINE_CANCELLAZIONE: tuple[type[TenantScoped], ...] = (
 
 # Una tabella non elencata resterebbe fuori dal diritto di cancellazione
 # mentre la rotta risponde "tenant cancellato": meglio rompere l'import.
-_TABELLE_COPERTE = {model.__tablename__ for model in _ORDINE_CANCELLAZIONE}
-_TABELLE_MANCANTI = set(Base.metadata.tables) - _TABELLE_COPERTE
-if _TABELLE_MANCANTI:
+_COVERED_TABLES = {model.__tablename__ for model in _DELETION_ORDER}
+_MISSING_TABLES = set(Base.metadata.tables) - _COVERED_TABLES
+if _MISSING_TABLES:
     raise RuntimeError(
-        f"cancellazione GDPR incompleta, tabelle non coperte: {sorted(_TABELLE_MANCANTI)}"
+        f"cancellazione GDPR incompleta, tabelle non coperte: {sorted(_MISSING_TABLES)}"
     )
 
 
@@ -71,7 +71,7 @@ class TenantViolation(PermissionError):
 
 
 @event.listens_for(Session, "after_begin")
-def _imposta_tenant_rls(
+def _set_rls_tenant(
     session: Session, transaction: SessionTransaction, connection: Connection
 ) -> None:
     """Comunica il tenant a Postgres per le policy RLS (quarta rete).
@@ -79,6 +79,12 @@ def _imposta_tenant_rls(
     `set_config(..., true)` è locale alla transazione: al commit/rollback
     la variabile decade da sola, nessun leak fra richieste che riusano la
     stessa connessione dal pool.
+
+    Vincolo d'ordine: il repository va costruito PRIMA di qualunque SQL
+    sulla sessione — la variabile è impostata all'inizio transazione
+    (autobegin alla prima query). SQL eseguito prima lascia la variabile
+    non impostata per tutta la transazione: la RLS filtra tutto
+    (fail-closed, nessun leak, ma letture vuote inspiegabili).
     """
     tenant = session.info.get(TENANT_SESSION_KEY)
     if tenant and connection.dialect.name == "postgresql":
@@ -89,7 +95,7 @@ def _imposta_tenant_rls(
 
 
 @event.listens_for(Session, "before_flush")
-def _blocca_scritture_fuori_tenant(
+def _block_cross_tenant_writes(
     session: Session, flush_context: object, instances: object
 ) -> None:
     """Ultima barriera prima del flush: nessuna riga esce verso un altro tenant.
@@ -108,8 +114,9 @@ def _blocca_scritture_fuori_tenant(
                 "scrittura fuori dal tenant del call-token"
             )
         stato_orm = inspect(entita)
-        if stato_orm is None:  # pragma: no cover - inspect su entità mappata
-            continue
+        # inspect() su un'entità mappata non restituisce mai None: se mai
+        # accadesse deve esplodere qui, non saltare il guard.
+        assert stato_orm is not None
         storico = stato_orm.attrs.tenant_id.history
         if storico.deleted and storico.deleted[0] != atteso:
             raise TenantViolation("il tenant_id di una riga esistente non è modificabile")
@@ -124,6 +131,15 @@ class TenantRepository:
     def __init__(self, session: Session, tenant_id: str):
         if not tenant_id:
             raise ValueError("tenant_id obbligatorio")
+        # Una sessione = un tenant: è l'assunzione del guard before_flush e
+        # del set_config RLS (che scatta all'inizio transazione e non può
+        # essere ri-emesso per un secondo tenant). Un mismatch è un errore
+        # di programmazione da far esplodere, non da degradare in silenzio.
+        gia_presente = session.info.get(TENANT_SESSION_KEY)
+        if gia_presente is not None and gia_presente != tenant_id:
+            raise TenantViolation(
+                "la sessione è già legata a un altro tenant: una sessione, un tenant"
+            )
         self._session = session
         self._tenant_id = tenant_id
         session.info[TENANT_SESSION_KEY] = tenant_id
@@ -198,7 +214,7 @@ class TenantRepository:
         rimuove righe di audit: serve al diritto di cancellazione.
         """
         conteggi: dict[str, int] = {}
-        for model in _ORDINE_CANCELLAZIONE:
+        for model in _DELETION_ORDER:
             result = cast(
                 CursorResult[Any],
                 self._session.execute(

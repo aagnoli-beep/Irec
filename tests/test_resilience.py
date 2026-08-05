@@ -15,6 +15,11 @@ from irec.main import create_app
 # --- jwks_url: enforcement https e indisponibilità ---
 
 
+def test_verifier_senza_sorgente_chiavi_rifiutato():
+    with pytest.raises(ValueError, match="jwks_url oppure static_jwks"):
+        CallTokenVerifier()
+
+
 def test_jwks_url_http_rejected():
     with pytest.raises(ValueError):
         CallTokenVerifier(jwks_url="http://mind.example.com/jwks")

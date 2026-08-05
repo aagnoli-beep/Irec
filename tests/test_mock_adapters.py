@@ -167,3 +167,106 @@ class TestRiconciliatore:
         esito = MockRiconciliatore().riconcilia(scenario.fatture, [])
         assert esito.pagamenti == ()
         assert len(esito.fatture_da_pagare) == len(scenario.fatture)
+
+    def test_movimento_a_importo_zero_non_e_un_incasso(self):
+        """Boundary del <= 0: un giroconto a zero non alloca nulla."""
+        fattura = scenario_demo(OGGI).fatture[0]
+        esito = MockRiconciliatore().riconcilia(
+            [fattura], [movimento(Decimal("0.00"), fattura.piva_cf_debitore)]
+        )
+        assert esito.pagamenti == ()
+        assert len(esito.movimenti_non_riconciliati) == 1
+
+    def test_fattura_a_importo_zero_non_svanisce_dall_esito(self):
+        """Invariante: ogni fattura in input compare nell'esito."""
+        zero = replace(scenario_demo(OGGI).fatture[0], importo=Decimal("0.00"))
+        esito = MockRiconciliatore().riconcilia([zero], [])
+        assert esito.pagamenti == ()
+        assert esito.fatture_da_pagare == (zero,)
+
+    def test_piu_movimenti_completano_la_stessa_fattura(self):
+        """N incassi → 1 fattura: pagamento a rate."""
+        fattura = replace(scenario_demo(OGGI).fatture[2], importo=Decimal("500.00"))
+        piva = fattura.piva_cf_debitore
+        rate = [
+            replace(movimento(Decimal("200.00"), piva), id_movimento="mov-a"),
+            replace(movimento(Decimal("300.00"), piva), id_movimento="mov-b"),
+        ]
+        esito = MockRiconciliatore().riconcilia([fattura], rate)
+        assert [p.importo_pagato for p in esito.pagamenti] == [
+            Decimal("200.00"),
+            Decimal("300.00"),
+        ]
+        assert esito.fatture_da_pagare == ()
+
+    def test_piu_movimenti_parziali_lasciano_la_fattura_aperta(self):
+        fattura = replace(scenario_demo(OGGI).fatture[2], importo=Decimal("500.00"))
+        piva = fattura.piva_cf_debitore
+        rate = [
+            replace(movimento(Decimal("200.00"), piva), id_movimento="mov-a"),
+            replace(movimento(Decimal("250.00"), piva), id_movimento="mov-b"),
+        ]
+        esito = MockRiconciliatore().riconcilia([fattura], rate)
+        assert esito.fatture_da_pagare == (fattura,)
+
+    def test_fifo_con_scadenze_uguali_e_deterministico(self):
+        """A parità di scadenza decide il numero fattura, sempre lo stesso."""
+        base = scenario_demo(OGGI).fatture[1]
+        prima = replace(base, numero="A-01", importo=Decimal("300.00"))
+        seconda = replace(base, numero="B-02", importo=Decimal("300.00"))
+        pagamento_parziale = movimento(Decimal("300.00"), base.piva_cf_debitore)
+
+        for _ in range(2):
+            esito = MockRiconciliatore().riconcilia(
+                [seconda, prima], [pagamento_parziale]
+            )
+            assert esito.pagamenti[0].numero_fattura == "A-01"
+
+    def test_duplicato_stesso_id_contenuto_diverso_vince_il_primo(self):
+        """Semantica dichiarata: l'id identifica il movimento, il contenuto
+        del duplicato viene ignorato."""
+        fattura = replace(scenario_demo(OGGI).fatture[0], importo=Decimal("1000.00"))
+        piva = fattura.piva_cf_debitore
+        primo = replace(movimento(Decimal("400.00"), piva), id_movimento="mov-dup")
+        secondo = replace(movimento(Decimal("999.00"), piva), id_movimento="mov-dup")
+        esito = MockRiconciliatore().riconcilia([fattura], [primo, secondo])
+        assert [p.importo_pagato for p in esito.pagamenti] == [Decimal("400.00")]
+
+
+class TestIsolamentoTenantMock:
+    def test_stessa_piva_su_due_tenant_non_si_contamina(self):
+        """La garanzia cardine vale anche nei mock: gli adapter reali
+        erediteranno questo contratto."""
+        piva = "09876543210"
+        fattura_a = replace(
+            scenario_demo(OGGI).fatture[0], numero="A-FA", piva_cf_debitore=piva
+        )
+        fattura_b = replace(
+            scenario_demo(OGGI).fatture[0], numero="B-FA", piva_cf_debitore=piva
+        )
+        scenari = {
+            "tenant-a": ScenarioTenant(
+                fatture=[fattura_a],
+                movimenti=[movimento(Decimal("10.00"), piva)],
+            ),
+            "tenant-b": ScenarioTenant(
+                fatture=[fattura_b],
+                movimenti=[movimento(Decimal("20.00"), piva)],
+            ),
+        }
+        cassetto = MockCassettoFiscale(scenari, oggi=OGGI)
+        banca = MockBanca(scenari, oggi=OGGI)
+        dal, al = OGGI - timedelta(days=60), OGGI
+
+        assert [f.numero for f in cassetto.recupera_fatture("tenant-a", dal, al)] == [
+            "A-FA"
+        ]
+        assert [f.numero for f in cassetto.recupera_fatture("tenant-b", dal, al)] == [
+            "B-FA"
+        ]
+        assert [m.importo for m in banca.recupera_movimenti("tenant-a", dal, al)] == [
+            Decimal("10.00")
+        ]
+        assert [m.importo for m in banca.recupera_movimenti("tenant-b", dal, al)] == [
+            Decimal("20.00")
+        ]

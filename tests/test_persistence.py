@@ -258,6 +258,7 @@ class TestRottaCancellazioneTenant:
 
         with session_scope(session_factory) as session:
             assert TenantRepository(session, TENANT).list(Fattura) == []
+        with session_scope(session_factory) as session:
             assert len(TenantRepository(session, "tenant-altro").list(Fattura)) == 1
 
     def test_senza_scope_dedicato_non_cancella(self, client, session_factory, make_token):

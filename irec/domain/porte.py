@@ -58,7 +58,12 @@ class ErroreCollegamento(Exception):
 
 @dataclass(frozen=True)
 class FatturaEsterna:
-    """Fattura come arriva dal cassetto fiscale (già decodificata dall'XML)."""
+    """Fattura come arriva dal cassetto fiscale (già decodificata dall'XML).
+
+    Assunzioni del contratto (da validare con le spec reali in M8):
+    - la coppia `(piva_cf_debitore, numero)` è univoca nel lotto;
+    - gli importi sono in EUR (nessun campo valuta in MVP).
+    """
 
     numero: str
     piva_cf_debitore: str
@@ -110,7 +115,10 @@ class FattureProvider(Protocol):
     """Microservizio Cassetto Fiscale (AdE/SDI)."""
 
     def stato_collegamento(self, tenant_id: str) -> CollegamentoEsterno:
-        """Stato della delega AdE del mandante (check quotidiano)."""
+        """Stato della delega AdE del mandante (check quotidiano).
+
+        Solleva ErroreCollegamento se il tenant è sconosciuto al servizio.
+        """
         ...
 
     def recupera_fatture(
@@ -126,7 +134,10 @@ class MovimentiProvider(Protocol):
     """Microservizio Banche (Fabrick/PSD2)."""
 
     def stato_consenso(self, tenant_id: str) -> CollegamentoEsterno:
-        """Stato del consenso PSD2 del mandante (check quotidiano)."""
+        """Stato del consenso PSD2 del mandante (check quotidiano).
+
+        Solleva ErroreCollegamento se il tenant è sconosciuto al servizio.
+        """
         ...
 
     def recupera_movimenti(

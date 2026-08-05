@@ -5,6 +5,8 @@ from urllib.parse import urlparse
 import httpx
 import jwt
 
+# HACK: payload JSON di servizi esterni (JWKS di Mind / claims del token),
+# forma non garantita da IREC — i campi usati sono validati puntualmente.
 Jwks = dict[str, Any]
 Claims = dict[str, Any]
 
@@ -60,8 +62,10 @@ class CallTokenVerifier:
         self._last_forced_refresh: float = 0.0
 
     def _fetch_jwks(self) -> Jwks:
-        # Il costruttore garantisce jwks_url quando static_jwks è assente.
-        assert self._jwks_url is not None
+        if self._jwks_url is None:
+            # Il costruttore lo garantisce; raise esplicito (non assert)
+            # perché con python -O gli assert spariscono.
+            raise RuntimeError("verifier senza jwks_url: invariante violato")
         try:
             response = httpx.get(self._jwks_url, timeout=JWKS_FETCH_TIMEOUT_SECONDS)
             response.raise_for_status()
