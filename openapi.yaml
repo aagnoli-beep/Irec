@@ -1,0 +1,303 @@
+openapi: 3.1.0
+info:
+  title: IREC — API v1
+  version: 1.0.0-draft.1
+  description: |
+    **BOZZA** — contratto di integrazione Mind → IREC, da concordare con il team Mind.
+    Questo file è la fonte di verità dell'integrazione (contract-first).
+
+    Convenzioni:
+    - Autenticazione: call-token coniato da Mind (JWT firmato, verifica JWKS lato IREC).
+      Claim richiesti: `sub`, `tenant_id`, `entitlement`, `scope`, `aud: "irec"`, `jti`, `exp`.
+    - `x-correlation-id`: ricevuto da Mind e ri-emesso nei log di IREC.
+    - Mutazioni idempotenti via header `Idempotency-Key`.
+    - Run lunghe: risposta `202 { run_id }`, poi poll su GET.
+    - Versioning `/v1`: solo cambi additivi; policy di deprecation da definire.
+    - Gli endpoint a supporto dei tool dell'agente (addendum agentico §6:
+      posizioni, storico solleciti, pausa/riprendi, ecc.) verranno aggiunti
+      in modo additivo in revisioni successive di questa bozza.
+
+servers:
+  - url: /v1
+
+security:
+  - callToken: []
+
+paths:
+  /ingest:
+    post:
+      operationId: ingestDataset
+      summary: Carica un dataset (fatture, incassi, pagamenti) per il tenant
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/IngestRequest'
+      responses:
+        '202':
+          description: Dataset accettato, elaborazione asincrona
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunAccepted'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/EntitlementError' }
+
+  /reconciliations:
+    post:
+      operationId: startReconciliation
+      summary: Avvia una run di riconciliazione incassi↔fatture
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202':
+          description: Run avviata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RunAccepted'
+        '403': { $ref: '#/components/responses/EntitlementError' }
+
+  /reconciliations/{run_id}:
+    get:
+      operationId: getReconciliation
+      summary: Stato e risultato di una run (match / unmatched / confidence)
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: run_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Stato della run
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReconciliationRun'
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /invoices:
+    get:
+      operationId: listInvoices
+      summary: Elenco fatture del tenant, filtrabile per stato
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [gestione, pausa, saldata, insoluto, overdue]
+        - name: as_of
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Fatture del tenant
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Invoice'
+        '403': { $ref: '#/components/responses/EntitlementError' }
+
+  /aging:
+    get:
+      operationId: getAging
+      summary: Bucket di aging del credito (30/60/90+)
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Aging del portafoglio del tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgingReport'
+
+  /usage:
+    get:
+      operationId: getUsage
+      summary: Consumo per il billing (aggregato da Mind)
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: Metriche di consumo del tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Usage'
+
+  # Gli endpoint operativi vivono alla root, fuori dal prefisso /v1
+  # (server override per-path).
+  /health:
+    servers:
+      - url: /
+    get:
+      operationId: health
+      summary: Liveness
+      security: []
+      responses:
+        '200':
+          description: Servizio vivo
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: ok }
+
+  /ready:
+    servers:
+      - url: /
+    get:
+      operationId: ready
+      summary: Readiness (verifier configurato; da M1 anche Postgres)
+      security: []
+      responses:
+        '200':
+          description: Servizio pronto
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: ready }
+        '503':
+          description: Dipendenze non pronte
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: not_ready }
+                  reason: { type: string }
+
+components:
+  securitySchemes:
+    callToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Call-token coniato da Mind, verificato da IREC via JWKS.
+
+  parameters:
+    CorrelationId:
+      name: x-correlation-id
+      in: header
+      schema: { type: string }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema: { type: string }
+
+  responses:
+    BadRequest:
+      description: Richiesta non valida
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    EntitlementError:
+      description: Entitlement assente o insufficiente
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: Risorsa non trovata
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      required: [error, code]
+      properties:
+        error: { type: string }
+        code: { type: string }
+
+    RunAccepted:
+      type: object
+      required: [run_id]
+      properties:
+        run_id: { type: string }
+
+    IngestRequest:
+      type: object
+      description: >-
+        Struttura provvisoria — dipende dai contratti dei microservizi esterni
+        (fatture XML AdE, movimenti formato API banca).
+      properties:
+        kind:
+          type: string
+          enum: [invoices, movements, payments]
+        payload:
+          type: object
+
+    ReconciliationRun:
+      type: object
+      properties:
+        run_id: { type: string }
+        status:
+          type: string
+          enum: [pending, running, completed, failed]
+        result:
+          type: object
+          properties:
+            matched: { type: array, items: { type: object } }
+            unmatched: { type: array, items: { type: object } }
+
+    Invoice:
+      type: object
+      properties:
+        id: { type: string }
+        numero: { type: string }
+        cliente: { type: string }
+        piva_cf: { type: string }
+        data_emissione: { type: string, format: date }
+        data_scadenza: { type: string, format: date }
+        importo: { type: number }
+        importo_residuo: { type: number }
+        stato:
+          type: string
+          enum: [gestione, pausa, saldata, insoluto]
+
+    AgingReport:
+      type: object
+      properties:
+        as_of: { type: string, format: date }
+        buckets:
+          type: array
+          items:
+            type: object
+            properties:
+              label: { type: string, examples: ['0-30', '31-60', '61-90', '90+'] }
+              importo: { type: number }
+              numero_fatture: { type: integer }
+
+    Usage:
+      type: object
+      properties:
+        tenant_id: { type: string }
+        period_from: { type: string, format: date }
+        period_to: { type: string, format: date }
+        metrics:
+          type: object
+          additionalProperties: { type: number }
