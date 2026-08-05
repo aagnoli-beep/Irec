@@ -18,7 +18,13 @@ from irec.domain.scheduler import (
 )
 
 
-def invio(cliente: str, canale: Canale, numero: str, template: str = "t") -> InvioDovuto:
+def invio(
+    cliente: str,
+    canale: Canale,
+    numero: str,
+    template: str = "t",
+    offset: int = 0,
+) -> InvioDovuto:
     return InvioDovuto(
         comunicazione_id=f"c-{numero}",
         fattura_id=f"f-{numero}",
@@ -27,6 +33,7 @@ def invio(cliente: str, canale: Canale, numero: str, template: str = "t") -> Inv
         template=template,
         numero_fattura=numero,
         importo_residuo="100.00",
+        offset_giorni=offset,
     )
 
 
@@ -83,11 +90,12 @@ class TestConsolidamento:
         ]
         assert len(consolida(invii)) == 2
 
-    def test_template_del_gruppo_e_quello_dell_ultimo_step(self):
-        """Il tono non deve regredire: si usa il template più avanzato."""
+    def test_template_del_gruppo_e_quello_piu_avanzato(self):
+        """Il tono non deve regredire: si usa il template con offset maggiore,
+        a prescindere dall'ordine di arrivo dei dati."""
         invii = [
-            invio("cli-1", Canale.EMAIL, "10-FA", template="sollecito_1"),
-            invio("cli-1", Canale.EMAIL, "11-FA", template="sollecito_4"),
+            invio("cli-1", Canale.EMAIL, "11-FA", template="sollecito_4", offset=15),
+            invio("cli-1", Canale.EMAIL, "10-FA", template="sollecito_1", offset=3),
         ]
         assert consolida(invii)[0].template == "sollecito_4"
 

@@ -52,9 +52,9 @@ def pasqua(anno: int) -> date:
     g = (b - f + 1) // 3
     h = (19 * a + b - d - g + 15) % 30
     i, k = divmod(c, 4)
-    length = (32 + 2 * e + 2 * i - h - k) % 7
-    m = (a + 11 * h + 22 * length) // 451
-    mese, giorno = divmod(h + length - 7 * m + 114, 31)
+    ell = (32 + 2 * e + 2 * i - h - k) % 7  # termine "l" dell'algoritmo
+    m = (a + 11 * h + 22 * ell) // 451
+    mese, giorno = divmod(h + ell - 7 * m + 114, 31)
     return date(anno, mese, giorno + 1)
 
 

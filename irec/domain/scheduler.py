@@ -64,7 +64,10 @@ def motivo_salto(
 
 def recapito_per(canale: Canale, recapiti: RecapitiCliente) -> str:
     valore = getattr(recapiti, _RECAPITO_PER_CANALE[canale])
-    assert valore  # garantito da motivo_salto == None
+    if not valore:
+        # Garantito da motivo_salto == None; raise (non assert) perché
+        # con python -O gli assert spariscono.
+        raise ValueError(f"recapito {canale} mancante dopo il controllo di salto")
     return str(valore)
 
 
@@ -85,6 +88,9 @@ class InvioDovuto:
     template: str
     numero_fattura: str
     importo_residuo: str  # stringa decimale: il messaggio è testo
+    # Offset dello step su T: determina quale template "vince" nel
+    # consolidamento (il più avanzato, il tono non deve regredire).
+    offset_giorni: int = 0
 
 
 @dataclass(frozen=True)
@@ -106,8 +112,9 @@ def consolida(invii: list[InvioDovuto]) -> list[InvioConsolidato]:
     """Un solo messaggio per cliente/canale per questo giro di invii.
 
     Il template del messaggio consolidato è quello dello step più
-    avanzato del gruppo (il tono non deve regredire); l'ordine dei
-    gruppi è deterministico.
+    avanzato del gruppo (offset maggiore): il tono non deve regredire,
+    e l'invariante non dipende dall'ordine di arrivo dei dati. L'ordine
+    dei gruppi è deterministico.
     """
     gruppi: dict[tuple[str, Canale], list[InvioDovuto]] = {}
     for invio in invii:
@@ -117,15 +124,31 @@ def consolida(invii: list[InvioDovuto]) -> list[InvioConsolidato]:
         gruppi.items(), key=lambda voce: (voce[0][0], voce[0][1])
     ):
         ordinato = tuple(sorted(gruppo, key=lambda invio: invio.numero_fattura))
+        piu_avanzato = max(gruppo, key=lambda invio: invio.offset_giorni)
         consolidati.append(
             InvioConsolidato(
                 cliente_id=cliente_id,
                 canale=canale,
-                template=gruppo[-1].template,
+                template=piu_avanzato.template,
                 invii=ordinato,
             )
         )
     return consolidati
+
+
+def recapiti_di(
+    email: str | None,
+    pec: str | None,
+    telefono: str | None,
+    canali_opt_out: list[str],
+) -> RecapitiCliente:
+    """Costruisce i recapiti dai campi del cliente (un solo punto di verità)."""
+    return RecapitiCliente(
+        email=email,
+        pec=pec,
+        telefono=telefono,
+        canali_opt_out=frozenset(canali_opt_out),
+    )
 
 
 def giorni_da_scadenza(oggi: date, scadenza: date) -> int:

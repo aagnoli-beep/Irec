@@ -77,3 +77,31 @@ class TestFinestraOraria:
 
     def test_risultato_sempre_utc(self):
         assert applica_finestra(istante_invio(date(2026, 8, 10))).tzinfo == UTC
+
+    def test_cambio_ora_legale_marzo(self):
+        """Ultima domenica di marzo 2026 (29/03): passaggio a CEST (+02).
+        Un invio del lunedì successivo deve essere alle 10:00 locali,
+        con offset UTC corretto per l'ora legale (08:00 UTC)."""
+        # 30/03/2026 è lunedì, già in ora legale.
+        lun = istante_invio(date(2026, 3, 30))
+        risultato = applica_finestra(lun)
+        locale = risultato.astimezone(TZ_ITALIA)
+        assert locale.hour == 10
+        assert risultato.hour == 8  # 10:00 CEST = 08:00 UTC
+
+    def test_cambio_ora_solare_ottobre(self):
+        """Ultima domenica di ottobre 2026 (25/10): ritorno a CET (+01).
+        Il lunedì 26/10 alle 10:00 locali è 09:00 UTC."""
+        lun = istante_invio(date(2026, 10, 26))
+        risultato = applica_finestra(lun)
+        locale = risultato.astimezone(TZ_ITALIA)
+        assert locale.hour == 10
+        assert risultato.hour == 9  # 10:00 CET = 09:00 UTC
+
+    def test_inverno_ed_estate_hanno_offset_utc_diversi(self):
+        """La stessa ora locale (10:00) mappa su UTC diversi a seconda
+        della stagione: la conversione non è un offset fisso."""
+        inverno = applica_finestra(istante_invio(date(2026, 1, 12))).hour  # 09 UTC
+        estate = applica_finestra(istante_invio(date(2026, 7, 13))).hour  # 08 UTC
+        assert inverno == 9
+        assert estate == 8

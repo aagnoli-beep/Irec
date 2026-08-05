@@ -392,6 +392,11 @@ components:
             comunicazioni_fallite: { type: integer }
             segnalazioni:
               type: array
+              description: >-
+                Codici operativi della fase invii (es.
+                `opt_out:email:<fattura_id>`, `invio_fallito:pec:<fattura_id>`,
+                `escalation_senza_mail_mandante:<fattura_id>`). Riferimenti
+                per id opaco, nessun numero fattura o importo.
               items: { type: string }
 
     Invoice:

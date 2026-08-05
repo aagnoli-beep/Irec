@@ -40,15 +40,28 @@ from irec.domain.scheduler import (
     consolida,
     escalation_imminente,
     in_escalation,
+    istante_step,
     motivo_salto,
+    recapiti_di,
     recapito_per,
 )
 from irec.domain.stati import puo_ricevere_sollecito
 
 
+def _recapiti(cliente: ClienteFinale) -> RecapitiCliente:
+    return recapiti_di(
+        cliente.email, cliente.pec, cliente.telefono, cliente.canali_opt_out
+    )
+
+
 @dataclass
 class EsitoInvii:
-    """Conteggi del giro di invii: solo numeri e codici, nessuna PII."""
+    """Conteggi del giro di invii + segnalazioni operative.
+
+    Le segnalazioni usano `fattura.id` (UUID opaco) e codici, mai numeri
+    fattura, importi o denominazioni: l'esito viaggia nel result della run
+    (GET /v1/reconciliations) e viene narrato dall'LLM di Mind.
+    """
 
     pause_riprese: int = 0
     escalation_eseguite: int = 0
@@ -76,9 +89,15 @@ class MotoreInvii:
 
     def esegui(self, repo: TenantRepository) -> EsitoInvii:
         esito = EsitoInvii()
+        # Un tenant = un mandante (uq_mandante_tenant): caricato una volta
+        # e passato alle fasi che ne hanno bisogno.
+        mandanti = repo.list(Mandante)
+        if not mandanti:
+            return esito
+        mandante = mandanti[0]
         self._riprendi_pause_scadute(repo, esito)
-        self._gestisci_escalation(repo, esito)
-        self._esegui_invii_dovuti(repo, esito)
+        self._gestisci_escalation(repo, mandante, esito)
+        self._esegui_invii_dovuti(repo, mandante, esito)
         return esito
 
     # --- 1. promesse di pagamento non mantenute (PRD 5.2) ---
@@ -105,9 +124,9 @@ class MotoreInvii:
 
     # --- 2. escalation T+45 e preavvisi T+44 (PRD 4.9, addendum 5.1) ---
 
-    def _gestisci_escalation(self, repo: TenantRepository, esito: EsitoInvii) -> None:
-        mandanti = repo.list(Mandante)
-        mandante = mandanti[0] if mandanti else None
+    def _gestisci_escalation(
+        self, repo: TenantRepository, mandante: Mandante, esito: EsitoInvii
+    ) -> None:
         for fattura in repo.find(Fattura, Fattura.stato == StatoFattura.GESTIONE):
             if escalation_imminente(self._oggi, fattura.data_scadenza):
                 # Il preavviso "domani parte l'escalation" è una notifica
@@ -123,13 +142,17 @@ class MotoreInvii:
         self,
         repo: TenantRepository,
         fattura: Fattura,
-        mandante: Mandante | None,
+        mandante: Mandante,
         esito: EsitoInvii,
     ) -> None:
         numeri = (fattura.numero,)
         residuo = str(fattura.importo_residuo)
 
-        self._canale_invio.invia(
+        # La mail a Recupero Crediti è la notifica formale: l'escalation è
+        # una transizione di stato, non un invio best-effort. Un fallimento
+        # di recapito viene segnalato ma NON blocca il passaggio a Insoluto
+        # (la pratica esce comunque dal perimetro solleciti a T+45).
+        esito_rc = self._canale_invio.invia(
             repo.tenant_id,
             MessaggioUscita(
                 canale=Canale.EMAIL,
@@ -140,7 +163,9 @@ class MotoreInvii:
                 importo_totale_residuo=residuo,
             ),
         )
-        if mandante is not None and mandante.alias_email:
+        if not esito_rc.consegnato:
+            esito.segnalazioni.append(f"escalation_mail_rc_fallita:{fattura.id}")
+        if mandante.alias_email:
             self._canale_invio.invia(
                 repo.tenant_id,
                 MessaggioUscita(
@@ -153,7 +178,7 @@ class MotoreInvii:
                 ),
             )
         else:
-            esito.segnalazioni.append(f"escalation_senza_mail_mandante:{fattura.numero}")
+            esito.segnalazioni.append(f"escalation_senza_mail_mandante:{fattura.id}")
 
         fattura.stato = StatoFattura.INSOLUTO
         esito.escalation_eseguite += 1
@@ -173,13 +198,19 @@ class MotoreInvii:
 
     # --- 3. invii dovuti, con consolidamento (PRD 4.6, 5.3) ---
 
-    def _esegui_invii_dovuti(self, repo: TenantRepository, esito: EsitoInvii) -> None:
-        mandanti = repo.list(Mandante)
-        if not mandanti:
-            return
-        pacchetto = mandanti[0].pacchetto
+    def _esegui_invii_dovuti(
+        self, repo: TenantRepository, mandante: Mandante, esito: EsitoInvii
+    ) -> None:
+        pacchetto = mandante.pacchetto
         clienti = {cliente.id: cliente for cliente in repo.list(ClienteFinale)}
         fatture = {fattura.id: fattura for fattura in repo.list(Fattura)}
+        # Offset per step: serve al consolidamento per scegliere il template
+        # più avanzato senza dipendere dall'ordine di arrivo.
+        offset_per_step = {
+            step.id: step.offset_giorni
+            for flusso in repo.list(Flusso)
+            for step in flusso.step
+        }
         dovute = repo.find(
             Comunicazione,
             Comunicazione.stato == StatoComunicazione.PROGRAMMATA,
@@ -200,19 +231,15 @@ class MotoreInvii:
                 continue
 
             cliente = clienti[fattura.cliente_id]
-            recapiti = RecapitiCliente(
-                email=cliente.email,
-                pec=cliente.pec,
-                telefono=cliente.telefono,
-                canali_opt_out=frozenset(cliente.canali_opt_out),
+            motivo = motivo_salto(
+                comunicazione.canale, pacchetto, _recapiti(cliente)
             )
-            motivo = motivo_salto(comunicazione.canale, pacchetto, recapiti)
             if motivo is not None:
                 comunicazione.stato = StatoComunicazione.SALTATA
                 comunicazione.esito_recapito = motivo
                 esito.comunicazioni_saltate += 1
                 esito.segnalazioni.append(
-                    f"{motivo}:{comunicazione.canale}:{fattura.numero}"
+                    f"{motivo}:{comunicazione.canale}:{fattura.id}"
                 )
                 continue
 
@@ -226,11 +253,12 @@ class MotoreInvii:
                     template=comunicazione.template,
                     numero_fattura=fattura.numero,
                     importo_residuo=str(fattura.importo_residuo),
+                    offset_giorni=offset_per_step.get(comunicazione.step_id or "", 0),
                 )
             )
 
         for gruppo in consolida(da_inviare):
-            self._invia_gruppo(repo, clienti[gruppo.cliente_id], gruppo, esito)
+            self._invia_gruppo(repo, clienti[gruppo.cliente_id], gruppo, comunicazioni, esito)
         repo.flush()
 
         for comunicazione in comunicazioni.values():
@@ -248,14 +276,9 @@ class MotoreInvii:
         repo: TenantRepository,
         cliente: ClienteFinale,
         gruppo: InvioConsolidato,
+        comunicazioni: dict[str, Comunicazione],
         esito: EsitoInvii,
     ) -> None:
-        recapiti = RecapitiCliente(
-            email=cliente.email,
-            pec=cliente.pec,
-            telefono=cliente.telefono,
-            canali_opt_out=frozenset(cliente.canali_opt_out),
-        )
         totale = sum(
             (Decimal(invio.importo_residuo) for invio in gruppo.invii), Decimal("0.00")
         )
@@ -263,7 +286,7 @@ class MotoreInvii:
             repo.tenant_id,
             MessaggioUscita(
                 canale=gruppo.canale,
-                destinatario=recapito_per(gruppo.canale, recapiti),
+                destinatario=recapito_per(gruppo.canale, _recapiti(cliente)),
                 template=gruppo.template,
                 denominazione_destinatario=cliente.denominazione,
                 numeri_fattura=gruppo.numeri_fattura,
@@ -278,8 +301,8 @@ class MotoreInvii:
             else StatoComunicazione.FALLITA
         )
         for invio in gruppo.invii:
-            comunicazione = repo.get(Comunicazione, invio.comunicazione_id)
-            assert comunicazione is not None
+            # Già in memoria: nessun repo.get nel loop.
+            comunicazione = comunicazioni[invio.comunicazione_id]
             comunicazione.stato = stato
             comunicazione.esito_recapito = risposta.dettaglio
             if risposta.consegnato:
@@ -288,7 +311,7 @@ class MotoreInvii:
             else:
                 esito.comunicazioni_fallite += 1
                 esito.segnalazioni.append(
-                    f"invio_fallito:{gruppo.canale}:{invio.numero_fattura}"
+                    f"invio_fallito:{gruppo.canale}:{invio.fattura_id}"
                 )
 
 
@@ -322,8 +345,6 @@ def ricalcola_schedule(repo: TenantRepository, fattura: Fattura) -> int:
     invio resta garantito dal vincolo per step); quelle già inviate
     restano storicizzate.
     """
-    from irec.domain.scheduler import istante_step
-
     step_per_id = {
         step.id: step for flusso in repo.list(Flusso) for step in flusso.step
     }

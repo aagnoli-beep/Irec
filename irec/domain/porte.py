@@ -19,6 +19,8 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
+from irec.domain.enums import Canale
+
 
 class StatoCollegamento(StrEnum):
     """Stato di un collegamento esterno (delega AdE o consenso PSD2)."""
@@ -153,7 +155,7 @@ class MessaggioUscita:
     """Messaggio consolidato verso il debitore (o verso Irec/mandante per
     l'escalation), pronto per il canale di invio."""
 
-    canale: str  # valore di Canale
+    canale: "Canale"
     destinatario: str  # email / PEC / numero, a seconda del canale
     template: str
     denominazione_destinatario: str

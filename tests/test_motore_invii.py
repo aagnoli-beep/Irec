@@ -3,7 +3,7 @@
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
-from irec.adapters.db.models import Comunicazione, Fattura
+from irec.adapters.db.models import ClienteFinale, Comunicazione, Fattura
 from irec.adapters.db.repository import TenantRepository
 from irec.adapters.db.session import session_scope
 from irec.adapters.mock.canali import MockCanaleInvio
@@ -124,6 +124,37 @@ class TestInvioDovuto:
             assert com.stato is StatoComunicazione.ANNULLATA
 
 
+    def test_comunicazione_gia_inviata_non_riparte(self, session_factory):
+        """Idempotenza del motore: una seconda esecuzione non re-invia le
+        comunicazioni già INVIATE (US-08 e protezione del debitore)."""
+        ids = prepara(session_factory)
+        programma(session_factory, ids["fattura"], Canale.EMAIL, istante(2026, 8, 10, 9))
+
+        canale_1 = MockCanaleInvio()
+        with session_scope(session_factory) as session:
+            motore(canale_1, istante(2026, 8, 10, 12)).esegui(
+                TenantRepository(session, TENANT)
+            )
+        assert len(canale_1.inviati) == 1
+        with session_scope(session_factory) as session:
+            com = TenantRepository(session, TENANT).list(Comunicazione)[0]
+            assert com.stato is StatoComunicazione.INVIATA
+            inviata_at_1 = com.inviata_at
+
+        # Seconda esecuzione, canale nuovo: nulla deve ripartire.
+        canale_2 = MockCanaleInvio()
+        with session_scope(session_factory) as session:
+            esito = motore(canale_2, istante(2026, 8, 10, 13)).esegui(
+                TenantRepository(session, TENANT)
+            )
+        assert esito.comunicazioni_inviate == 0
+        assert canale_2.inviati == []
+        with session_scope(session_factory) as session:
+            com = TenantRepository(session, TENANT).list(Comunicazione)[0]
+            assert com.stato is StatoComunicazione.INVIATA
+            assert com.inviata_at == inviata_at_1
+
+
 class TestConsolidamentoInvii:
     def test_due_fatture_stesso_cliente_un_solo_messaggio(self, session_factory):
         ids = prepara(session_factory)
@@ -152,6 +183,52 @@ class TestConsolidamentoInvii:
         assert len(canale.inviati) == 1
         assert set(canale.inviati[0].messaggio.numeri_fattura) == {"32-FA", "99-FA"}
         assert canale.inviati[0].messaggio.importo_totale_residuo == "2440.00"
+
+    def test_consolidamento_su_due_posizioni_dello_stesso_cliente(
+        self, session_factory
+    ):
+        """Il consolidamento è per cliente/canale, non per posizione:
+        l'importo totale somma fatture di posizioni diverse."""
+        ids = prepara(session_factory)
+        with session_scope(session_factory) as session:
+            repo = TenantRepository(session, TENANT)
+            seconda_pos = repo.add(make_posizione(ids["cliente"]))
+            repo.flush()
+            altra = repo.add(
+                make_fattura(seconda_pos.id, ids["cliente"], numero="77-FA")
+            )
+            repo.flush()
+            altra_id = altra.id
+        programma(session_factory, ids["fattura"], Canale.EMAIL, istante(2026, 8, 10, 9))
+        programma(session_factory, altra_id, Canale.EMAIL, istante(2026, 8, 10, 9))
+
+        canale = MockCanaleInvio()
+        with session_scope(session_factory) as session:
+            esito = motore(canale, istante(2026, 8, 10, 12)).esegui(
+                TenantRepository(session, TENANT)
+            )
+        assert esito.messaggi_inviati == 1
+        assert len(canale.inviati) == 1
+        assert set(canale.inviati[0].messaggio.numeri_fattura) == {"32-FA", "77-FA"}
+        assert canale.inviati[0].messaggio.importo_totale_residuo == "2440.00"
+
+
+class TestOptOut:
+    def test_opt_out_del_canale_salta_l_invio(self, session_factory):
+        ids = prepara(session_factory)
+        with session_scope(session_factory) as session:
+            repo = TenantRepository(session, TENANT)
+            cliente = repo.get(ClienteFinale, ids["cliente"])
+            cliente.canali_opt_out = ["email"]
+        programma(session_factory, ids["fattura"], Canale.EMAIL, istante(2026, 8, 10, 9))
+        canale = MockCanaleInvio()
+        with session_scope(session_factory) as session:
+            esito = motore(canale, istante(2026, 8, 10, 12)).esegui(
+                TenantRepository(session, TENANT)
+            )
+        assert esito.comunicazioni_saltate == 1
+        assert canale.inviati == []
+        assert any("opt_out" in s for s in esito.segnalazioni)
 
 
 class TestCanaliPerPacchetto:
@@ -228,6 +305,44 @@ class TestEscalation:
         destinatari = {reg.messaggio.destinatario for reg in canale.inviati}
         assert "rc@irec.example" in destinatari
         assert "acme@irec.example" in destinatari
+        with session_scope(session_factory) as session:
+            fattura = TenantRepository(session, TENANT).get(Fattura, ids["fattura"])
+            assert fattura.stato is StatoFattura.INSOLUTO
+
+    def test_senza_mail_mandante_manda_solo_recupero_crediti(self, session_factory):
+        """alias_email None: la fattura passa comunque a Insoluto, parte solo
+        la mail a Recupero Crediti, con segnalazione."""
+        ids = prepara(session_factory, alias=None)
+        with session_scope(session_factory) as session:
+            repo = TenantRepository(session, TENANT)
+            fattura = repo.get(Fattura, ids["fattura"])
+            fattura.data_scadenza = date(2026, 8, 10) - timedelta(days=45)
+            fattura.data_emissione = fattura.data_scadenza - timedelta(days=30)
+
+        canale = MockCanaleInvio()
+        with session_scope(session_factory) as session:
+            esito = motore(canale, istante(2026, 8, 10)).esegui(
+                TenantRepository(session, TENANT)
+            )
+        assert esito.escalation_eseguite == 1
+        assert len(canale.inviati) == 1
+        assert canale.inviati[0].messaggio.destinatario == "rc@irec.example"
+        assert any("escalation_senza_mail_mandante" in s for s in esito.segnalazioni)
+        with session_scope(session_factory) as session:
+            fattura = TenantRepository(session, TENANT).get(Fattura, ids["fattura"])
+            assert fattura.stato is StatoFattura.INSOLUTO
+
+    def test_escalation_con_mail_fallita_va_comunque_insoluto(self, session_factory):
+        """L'escalation è una transizione di stato: il fallimento del
+        recapito la segnala ma non la blocca (PRD 4.9)."""
+        ids = self._fattura_a_t45(session_factory, 45)
+        canale = MockCanaleInvio(canali_in_errore={"email"})
+        with session_scope(session_factory) as session:
+            esito = motore(canale, istante(2026, 8, 10)).esegui(
+                TenantRepository(session, TENANT)
+            )
+        assert esito.escalation_eseguite == 1
+        assert any("escalation_mail_rc_fallita" in s for s in esito.segnalazioni)
         with session_scope(session_factory) as session:
             fattura = TenantRepository(session, TENANT).get(Fattura, ids["fattura"])
             assert fattura.stato is StatoFattura.INSOLUTO
