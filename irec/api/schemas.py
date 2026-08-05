@@ -7,38 +7,30 @@ stringhe decimali (mai float: dominio finanziario).
 
 from datetime import date, datetime
 from decimal import Decimal
+from typing import Annotated
 
-from pydantic import BaseModel, field_serializer
+from pydantic import BaseModel, Field, PlainSerializer
 
-
-class ImportoMixin:
-    @staticmethod
-    def _dec(value: Decimal) -> str:
-        return str(value)
+# Importo serializzato come stringa decimale (mai float: dominio finanziario).
+# Un solo tipo riusabile, così ogni campo-importo eredita la convenzione senza
+# ripetere il serializer.
+ImportoStr = Annotated[Decimal, PlainSerializer(str, return_type=str)]
 
 
 class KpiOut(BaseModel):
-    affidato: Decimal
-    recuperato: Decimal
-    da_recuperare: Decimal
-    passato_a_recupero: Decimal
+    affidato: ImportoStr
+    recuperato: ImportoStr
+    da_recuperare: ImportoStr
+    passato_a_recupero: ImportoStr
     fatture_per_stato: dict[str, int]
     posizioni_aperte: int
     posizioni_chiuse: int
 
-    @field_serializer("affidato", "recuperato", "da_recuperare", "passato_a_recupero")
-    def _ser(self, value: Decimal) -> str:
-        return str(value)
-
 
 class BucketAgingOut(BaseModel):
     label: str
-    importo: Decimal
+    importo: ImportoStr
     numero_fatture: int
-
-    @field_serializer("importo")
-    def _ser(self, value: Decimal) -> str:
-        return str(value)
 
 
 class AgingOut(BaseModel):
@@ -53,13 +45,9 @@ class FatturaOut(BaseModel):
     piva_cf: str
     data_emissione: date
     data_scadenza: date
-    importo: Decimal
-    importo_residuo: Decimal
+    importo: ImportoStr
+    importo_residuo: ImportoStr
     stato: str
-
-    @field_serializer("importo", "importo_residuo")
-    def _ser(self, value: Decimal) -> str:
-        return str(value)
 
 
 class FattureOut(BaseModel):
@@ -71,12 +59,8 @@ class PosizioneOut(BaseModel):
     cliente: str
     piva_cf: str
     stato: str
-    importo_totale_residuo: Decimal
+    importo_totale_residuo: ImportoStr
     fatture: list[FatturaOut]
-
-    @field_serializer("importo_totale_residuo")
-    def _ser(self, value: Decimal) -> str:
-        return str(value)
 
 
 class ComunicazioneOut(BaseModel):
@@ -119,10 +103,14 @@ class PausaIn(BaseModel):
     motivo: str = "sospensione manuale"
 
 
+# Tetto di sicurezza sull'importo di un pagamento manuale: oltre questo è
+# quasi certamente un errore di battitura, e protegge dall'overflow NUMERIC.
+IMPORTO_MASSIMO = Decimal("100000000.00")
+
+
 class PagamentoManualeIn(BaseModel):
-    importo: Decimal
+    importo: Decimal = Field(gt=0, le=IMPORTO_MASSIMO)
     data_pagamento: date
-    idempotency_key: str
 
 
 class RecapitiIn(BaseModel):

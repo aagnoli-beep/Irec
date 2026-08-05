@@ -332,6 +332,48 @@ class TestRiconciliazione:
             chiavi = {pagamento.chiave_idempotenza for pagamento in repo.list(Pagamento)}
         assert "mov-001:32-FA" in chiavi  # stessa chiave che userebbe il manuale
 
+    def test_pagamento_manuale_poi_riconciliazione_non_conta_due_volte(
+        self, session_factory
+    ):
+        """Cross-source (addendum §7): salda a mano una fattura, poi arriva
+        il movimento bancario dello stesso incasso → non ri-allocato, il
+        residuo resta 0, un solo pagamento a sistema."""
+        from irec.services.azioni import registra_pagamento_manuale
+
+        base = scenario_demo(OGGI)
+        fattura_32 = base.fatture[0]  # 1220.00, saldata da mov-001
+        scenario = ScenarioTenant(
+            fatture=[fattura_32], movimenti=[base.movimenti[0]]
+        )
+        prepara_mandante(session_factory)
+        esegui(session_factory, ScenarioTenant(fatture=[fattura_32]))  # solo import
+
+        with session_scope(session_factory) as session:
+            repo = TenantRepository(session, TENANT)
+            fattura = repo.list(Fattura)[0]
+            # Chiave uguale a quella che userebbe la riconciliazione.
+            registra_pagamento_manuale(
+                repo,
+                fattura.id,
+                Decimal("1220.00"),
+                OGGI,
+                "mov-001:32-FA",
+                operatore="u1",
+            )
+
+        with session_scope(session_factory) as session:
+            fattura = TenantRepository(session, TENANT).list(Fattura)[0]
+            assert fattura.stato is StatoFattura.SALDATA
+            assert fattura.importo_residuo == Decimal("0.00")
+
+        # Ora gira il ciclo con il movimento bancario dello stesso incasso.
+        esito = esegui(session_factory, scenario)
+        assert esito.pagamenti_registrati == 0
+        with session_scope(session_factory) as session:
+            repo = TenantRepository(session, TENANT)
+            assert len(repo.list(Pagamento)) == 1
+            assert repo.list(Fattura)[0].importo_residuo == Decimal("0.00")
+
     def test_posizione_chiusa_quando_tutte_le_fatture_escono_dal_flusso(
         self, session_factory
     ):

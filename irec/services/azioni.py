@@ -37,6 +37,7 @@ from irec.domain.scheduler import (
     recapito_per,
 )
 from irec.domain.stati import (
+    STATI_CREDITO_APERTO,
     residuo_dopo_incasso,
     stato_dopo_pagamento,
     stato_posizione,
@@ -58,6 +59,14 @@ def _fattura(repo: TenantRepository, fattura_id: str) -> Fattura:
     return fattura
 
 
+def _mandante(repo: TenantRepository) -> Mandante:
+    """Il mandante del tenant. 404 pulito se il provisioning è incompleto."""
+    mandanti = repo.list(Mandante)
+    if not mandanti:
+        raise AppError(404, "mandante_not_found", "mandante non censito")
+    return mandanti[0]
+
+
 def pausa_fattura(
     repo: TenantRepository,
     fattura_id: str,
@@ -67,7 +76,7 @@ def pausa_fattura(
 ) -> Fattura:
     """Sospende il flusso (promessa di pagamento, contestazione, manuale)."""
     fattura = _fattura(repo, fattura_id)
-    if fattura.stato not in (StatoFattura.GESTIONE, StatoFattura.PAUSA):
+    if fattura.stato not in STATI_CREDITO_APERTO:
         raise AppError(
             409, "invoice_not_pausable", f"fattura in stato {fattura.stato}"
         )
@@ -150,7 +159,7 @@ def forza_comunicazione(
         raise AppError(
             409, "invoice_not_active", f"fattura in stato {fattura.stato}"
         )
-    mandante = repo.list(Mandante)[0]
+    mandante = _mandante(repo)
     cliente = repo.get(ClienteFinale, fattura.cliente_id)
     if cliente is None:  # pragma: no cover - FK composite lo impediscono
         raise AppError(404, "client_not_found", "cliente non trovato")
@@ -224,8 +233,14 @@ def registra_pagamento_manuale(
         return EsitoPagamentoManuale(
             fattura=fattura, gia_registrato=True, comunicazioni_annullate=0
         )
-    if fattura.stato in (StatoFattura.SALDATA,):
+    if fattura.stato is StatoFattura.SALDATA:
         raise AppError(409, "invoice_already_paid", "fattura già saldata")
+    if fattura.stato is StatoFattura.INSOLUTO:
+        # Uscita dal perimetro solleciti a T+45: gli incassi si registrano
+        # dal servizio Recupero Crediti, non da qui.
+        raise AppError(
+            409, "invoice_in_recovery", "fattura passata a Recupero Crediti"
+        )
 
     repo.add(
         Pagamento(
@@ -312,21 +327,10 @@ class StepFlusso:
     template: str
 
 
-def sostituisci_flusso(
-    repo: TenantRepository,
-    steps: list[StepFlusso],
-    operatore: str,
-    adesso: datetime,
-) -> Flusso:
-    """Sostituisce il flusso del mandante (US-02, Value/Premium).
-
-    Le modifiche valgono per gli step FUTURI: le comunicazioni già inviate
-    restano storicizzate, quelle programmate del vecchio flusso vengono
-    annullate e ri-programmate dai nuovi step (solo con data futura).
-    """
-    mandante = repo.list(Mandante)[0]
+def _valida_flusso(mandante: Mandante, steps: list[StepFlusso]) -> None:
+    """Permessi per pacchetto e coerenza degli step (addendum §5.3)."""
     if mandante.pacchetto not in PACCHETTI_CON_FLUSSO_PERSONALIZZABILE:
-        # Upsell garbato, non errore freddo (addendum §5.3).
+        # Upsell garbato, non errore freddo.
         raise AppError(
             403,
             "upgrade_required",
@@ -350,28 +354,14 @@ def sostituisci_flusso(
             f"pacchetto {mandante.pacchetto.value}: con un upgrade si sbloccano.",
         )
 
-    for flusso in repo.list(Flusso):
-        flusso.attivo = False
-    nuovo = repo.add(Flusso(mandante_id=mandante.id, nome="Flusso personalizzato"))
-    repo.flush()
-    nuovi_step: list[FlussoStep] = []
-    for step in sorted(steps, key=lambda s: s.ordine):
-        riga = repo.add(
-            FlussoStep(
-                flusso_id=nuovo.id,
-                ordine=step.ordine,
-                offset_giorni=step.offset_giorni,
-                canale=step.canale,
-                template=step.template,
-            )
-        )
-        nuovi_step.append(riga)
-    repo.flush()
 
-    # Riprogrammazione: annulla le programmate del vecchio flusso e crea le
-    # nuove SOLO con istante futuro (gli step passati non si recuperano).
+def _riprogramma_comunicazioni(
+    repo: TenantRepository, nuovi_step: list[FlussoStep], adesso: datetime
+) -> None:
+    """Annulla le programmate del vecchio flusso e crea le nuove SOLO con
+    istante futuro: gli step già passati non si recuperano (PRD 4.5)."""
     for fattura in repo.find(
-        Fattura, Fattura.stato.in_([StatoFattura.GESTIONE, StatoFattura.PAUSA])
+        Fattura, Fattura.stato.in_(list(STATI_CREDITO_APERTO))
     ):
         for comunicazione in fattura.comunicazioni:
             if comunicazione.stato is StatoComunicazione.PROGRAMMATA:
@@ -390,6 +380,42 @@ def sostituisci_flusso(
                     programmata_per=istante,
                 )
             )
+
+
+def sostituisci_flusso(
+    repo: TenantRepository,
+    steps: list[StepFlusso],
+    operatore: str,
+    adesso: datetime,
+) -> Flusso:
+    """Sostituisce il flusso del mandante (US-02, Value/Premium).
+
+    Le modifiche valgono per gli step FUTURI: le comunicazioni già inviate
+    restano storicizzate, quelle programmate del vecchio flusso vengono
+    annullate e ri-programmate dai nuovi step (solo con data futura).
+    """
+    mandante = _mandante(repo)
+    _valida_flusso(mandante, steps)
+
+    for flusso in repo.list(Flusso):
+        flusso.attivo = False
+    nuovo = repo.add(Flusso(mandante_id=mandante.id, nome="Flusso personalizzato"))
+    repo.flush()
+    nuovi_step = [
+        repo.add(
+            FlussoStep(
+                flusso_id=nuovo.id,
+                ordine=step.ordine,
+                offset_giorni=step.offset_giorni,
+                canale=step.canale,
+                template=step.template,
+            )
+        )
+        for step in sorted(steps, key=lambda s: s.ordine)
+    ]
+    repo.flush()
+
+    _riprogramma_comunicazioni(repo, nuovi_step, adesso)
     repo.log_event(
         TipoEvento.AZIONE_MANUALE,
         entita="flusso",
@@ -411,7 +437,7 @@ def genera_e_invia_report(
     repo: TenantRepository, canale_invio: CanaleInvio, operatore: str
 ) -> EsitoReport:
     """Genera il report KPI e lo invia al mandante via email (PRD 4.10)."""
-    mandante = repo.list(Mandante)[0]
+    mandante = _mandante(repo)
     if not mandante.alias_email:
         return EsitoReport(inviato=False, destinatario_presente=False)
     kpi = calcola_kpi(repo)

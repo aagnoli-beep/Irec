@@ -1,6 +1,6 @@
 """Rotte di lettura autonoma /v1 (M5)."""
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
@@ -93,6 +93,39 @@ class TestPortfolio:
     def test_senza_token_401(self, app, client, dati):
         assert client.get("/v1/portfolio").status_code == 401
 
+    def test_portfolio_vuoto(self, app, client, make_token, session_factory):
+        with session_scope(session_factory) as session:
+            TenantRepository(session, TENANT).add(make_mandante())
+        body = _get(client, make_token, "/v1/portfolio").json()
+        assert body["affidato"] == "0.00"
+        assert body["da_recuperare"] == "0.00"
+        assert body["passato_a_recupero"] == "0.00"
+        assert body["fatture_per_stato"]["gestione"] == 0
+
+    def test_fatture_insolute_vanno_in_passato_a_recupero(
+        self, app, client, make_token, session_factory
+    ):
+        with session_scope(session_factory) as session:
+            repo = TenantRepository(session, TENANT)
+            m = repo.add(make_mandante())
+            repo.flush()
+            c = repo.add(make_cliente(m.id))
+            repo.flush()
+            p = repo.add(make_posizione(c.id))
+            repo.flush()
+            repo.add(
+                make_fattura(
+                    p.id,
+                    c.id,
+                    importo=Decimal("1000.00"),
+                    importo_residuo=Decimal("1000.00"),
+                    stato=StatoFattura.INSOLUTO,
+                )
+            )
+        body = _get(client, make_token, "/v1/portfolio").json()
+        assert body["passato_a_recupero"] == "1000.00"
+        assert body["da_recuperare"] == "0.00"
+
 
 class TestAging:
     def test_bucket(self, app, client, make_token, dati):
@@ -105,6 +138,45 @@ class TestAging:
         # A-2 è saldata: non entra nell'aging.
         scadere = next(b for b in body["buckets"] if b["label"] == "a_scadere")
         assert scadere["numero_fatture"] == 0
+
+    @pytest.mark.parametrize(
+        "giorni_scaduto,bucket_atteso",
+        [
+            (-1, "a_scadere"),
+            (0, "0-30"),
+            (30, "0-30"),
+            (31, "31-60"),
+            (60, "31-60"),
+            (61, "61-90"),
+            (90, "61-90"),
+            (91, "90+"),
+        ],
+    )
+    def test_confini_esatti_dei_bucket(
+        self, app, client, make_token, session_factory, giorni_scaduto, bucket_atteso
+    ):
+        oggi = date(2026, 8, 1)
+        scadenza = oggi - timedelta(days=giorni_scaduto)
+        with session_scope(session_factory) as session:
+            repo = TenantRepository(session, TENANT)
+            m = repo.add(make_mandante())
+            repo.flush()
+            c = repo.add(make_cliente(m.id))
+            repo.flush()
+            p = repo.add(make_posizione(c.id))
+            repo.flush()
+            repo.add(
+                make_fattura(
+                    p.id,
+                    c.id,
+                    data_emissione=scadenza - timedelta(days=1),
+                    data_scadenza=scadenza,
+                    importo_residuo=Decimal("100.00"),
+                )
+            )
+        body = _get(client, make_token, "/v1/aging?as_of=2026-08-01").json()
+        pieno = [b["label"] for b in body["buckets"] if b["numero_fatture"] == 1]
+        assert pieno == [bucket_atteso], f"{giorni_scaduto}gg → {pieno}"
 
 
 class TestInvoices:

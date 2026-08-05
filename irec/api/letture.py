@@ -29,12 +29,11 @@ from irec.services.letture import (
     calcola_aging,
     calcola_consumo,
     calcola_kpi,
+    elenco_scadute,
     spiegazione_comunicazione,
 )
 
 router = APIRouter(prefix="/v1")
-
-STATI_SCADUTA = (StatoFattura.GESTIONE, StatoFattura.PAUSA)
 
 
 def _clienti(repo: RepositoryDep) -> dict[str, ClienteFinale]:
@@ -115,11 +114,7 @@ def get_invoices(
 
     selezionate: Sequence[Fattura]
     if status == "scaduta":
-        selezionate = [
-            f
-            for f in repo.list(Fattura)
-            if f.stato in STATI_SCADUTA and f.data_scadenza < oggi
-        ]
+        selezionate = elenco_scadute(repo, oggi)
     elif status is not None:
         try:
             stato = StatoFattura(status)
@@ -141,8 +136,9 @@ def get_position(position_id: str, repo: RepositoryDep) -> PosizioneOut:
     posizione = repo.get(Posizione, position_id)
     if posizione is None:
         raise AppError(404, "position_not_found", "posizione non trovata")
-    clienti = _clienti(repo)
-    cliente = clienti[posizione.cliente_id]
+    cliente = repo.get(ClienteFinale, posizione.cliente_id)
+    if cliente is None:  # pragma: no cover - FK composite lo impediscono
+        raise AppError(404, "client_not_found", "cliente non trovato")
     fatture = sorted(posizione.fatture, key=lambda f: (f.data_scadenza, f.numero))
     totale = sum((f.importo_residuo for f in fatture), Decimal("0.00"))
     return PosizioneOut(

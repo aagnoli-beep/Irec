@@ -3,6 +3,7 @@
 Funzioni senza IO: decidono lo stato risultante, non lo persistono.
 """
 
+from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 
 from irec.domain.enums import StatoFattura, StatoPosizione
@@ -30,6 +31,17 @@ STATI_TERMINALI: frozenset[StatoFattura] = frozenset(
 STATI_NON_SOLLECITABILI: frozenset[StatoFattura] = frozenset(
     {StatoFattura.SALDATA, StatoFattura.PAUSA, StatoFattura.INSOLUTO}
 )
+
+# Fattura con credito ancora aperto (né saldata né uscita dal flusso): è su
+# queste che ha senso ragionare di scaduto, aging e nuovi incassi.
+STATI_CREDITO_APERTO: frozenset[StatoFattura] = frozenset(
+    {StatoFattura.GESTIONE, StatoFattura.PAUSA}
+)
+
+
+def e_scaduta(stato: StatoFattura, scadenza: date, oggi: date) -> bool:
+    """Fattura a credito aperto la cui scadenza T è già passata."""
+    return stato in STATI_CREDITO_APERTO and scadenza < oggi
 
 
 class TransizioneNonValida(ValueError):

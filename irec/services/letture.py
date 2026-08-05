@@ -18,6 +18,7 @@ from irec.adapters.db.models import (
 from irec.adapters.db.repository import TenantRepository
 from irec.domain.calendario import assumi_utc
 from irec.domain.enums import StatoComunicazione, StatoFattura, StatoPosizione
+from irec.domain.stati import STATI_CREDITO_APERTO, e_scaduta
 
 # Bucket di aging del credito scaduto, in giorni dalla scadenza.
 AGING_BUCKETS: tuple[tuple[str, int, int | None], ...] = (
@@ -76,7 +77,7 @@ def calcola_aging(repo: TenantRepository, oggi: date) -> list[BucketAging]:
     bucket[ETICHETTA_A_SCADERE] = BucketAging(ETICHETTA_A_SCADERE, Decimal("0.00"), 0)
 
     for fattura in repo.list(Fattura):
-        if fattura.stato not in (StatoFattura.GESTIONE, StatoFattura.PAUSA):
+        if fattura.stato not in STATI_CREDITO_APERTO:
             continue
         giorni = (oggi - fattura.data_scadenza).days
         if giorni < 0:
@@ -91,6 +92,15 @@ def calcola_aging(repo: TenantRepository, oggi: date) -> list[BucketAging]:
         destinazione.numero_fatture += 1
 
     return [bucket[ETICHETTA_A_SCADERE]] + [bucket[label] for label, _, _ in AGING_BUCKETS]
+
+
+def elenco_scadute(repo: TenantRepository, oggi: date) -> list[Fattura]:
+    """Fatture a credito aperto con scadenza già passata (filtro derivato).
+
+    La regola vive qui, non nella rotta: `e_scaduta` è pura, il filtro
+    grezzo per stato arriva dal DB e la data si valuta in memoria."""
+    candidate = repo.find(Fattura, Fattura.stato.in_(list(STATI_CREDITO_APERTO)))
+    return [f for f in candidate if e_scaduta(f.stato, f.data_scadenza, oggi)]
 
 
 def spiegazione_comunicazione(
@@ -148,12 +158,10 @@ def calcola_consumo(
     consumo.fatture_gestite = sum(
         1 for fattura in repo.list(Fattura) if nel_periodo(fattura.created_at)
     )
-    consumo.messaggi_inviati = sum(
-        1
-        for comunicazione in repo.list(Comunicazione)
-        if comunicazione.stato is StatoComunicazione.INVIATA
-        and nel_periodo(comunicazione.inviata_at)
+    inviate = repo.find(
+        Comunicazione, Comunicazione.stato == StatoComunicazione.INVIATA
     )
+    consumo.messaggi_inviati = sum(1 for c in inviate if nel_periodo(c.inviata_at))
     consumo.run_eseguite = sum(
         1 for run in repo.list(SyncRun) if nel_periodo(run.conclusa_at)
     )

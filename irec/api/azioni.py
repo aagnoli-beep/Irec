@@ -9,7 +9,7 @@ servizi (`irec/services/azioni.py`), non qui.
 from datetime import UTC, datetime
 from typing import Annotated, cast
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Header, Request
 
 from irec.api.deps import RepositoryDep
 from irec.api.schemas import (
@@ -92,16 +92,21 @@ def force_communication(
 
 @router.post("/invoices/{invoice_id}/payments", response_model=PagamentoManualeOut)
 def register_payment(
-    invoice_id: str, body: PagamentoManualeIn, repo: RepositoryDep, ctx: WriteContext
+    invoice_id: str,
+    body: PagamentoManualeIn,
+    repo: RepositoryDep,
+    ctx: WriteContext,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> PagamentoManualeOut:
-    """Registra un pagamento manuale (idempotente). Azione con conferma."""
+    """Registra un pagamento manuale (idempotente). Azione con conferma.
+
+    `Idempotency-Key` obbligatoria (header): un retry con la stessa chiave
+    restituisce l'esito senza registrare due volte l'incasso.
+    """
+    if not idempotency_key:
+        raise AppError(400, "missing_idempotency_key", "Idempotency-Key header required")
     esito = svc.registra_pagamento_manuale(
-        repo,
-        invoice_id,
-        body.importo,
-        body.data_pagamento,
-        body.idempotency_key,
-        ctx.sub,
+        repo, invoice_id, body.importo, body.data_pagamento, idempotency_key, ctx.sub
     )
     return PagamentoManualeOut(
         fattura_id=esito.fattura.id,

@@ -18,8 +18,10 @@ modo additivo.
   Permessi per pacchetto enforced nel servizio (Entry che personalizza il
   flusso → `403 upgrade_required` con invito garbato). Nuova risposta
   `Conflict` per gli stati incompatibili. Il contratto è ora verificato
-  contro l'implementazione da `tests/test_contract_conformance.py`; `/ingest`
-  resta l'unico endpoint dichiarato ma non implementato (valutazione M8).
+  contro l'implementazione da `tests/test_contract_conformance.py` (path +
+  metodo); `/ingest` resta l'unico endpoint dichiarato ma non implementato
+  (valutazione M8). `Idempotency-Key` del pagamento manuale via header;
+  importi come stringhe decimali su tutti gli endpoint (aging incluso).
 
 - Implementati `POST /v1/reconciliations` (202 + `run_id`, `Idempotency-Key`
   obbligatoria con retry che restituisce la stessa run) e

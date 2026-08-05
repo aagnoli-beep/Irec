@@ -162,6 +162,8 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/Invoice'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/EntitlementError' }
 
   /aging:
@@ -387,6 +389,7 @@ paths:
       summary: Registra un pagamento manuale, idempotente (scope irec.write)
       parameters:
         - $ref: '#/components/parameters/CorrelationId'
+        - $ref: '#/components/parameters/IdempotencyKey'
         - { name: invoice_id, in: path, required: true, schema: { type: string } }
       requestBody:
         required: true
@@ -394,11 +397,10 @@ paths:
           application/json:
             schema:
               type: object
-              required: [importo, data_pagamento, idempotency_key]
+              required: [importo, data_pagamento]
               properties:
                 importo: { type: string, format: decimal }
                 data_pagamento: { type: string, format: date }
-                idempotency_key: { type: string }
       responses:
         '200':
           description: Esito del pagamento
@@ -406,6 +408,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/PagamentoManuale' }
         '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/EntitlementError' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
@@ -553,7 +556,9 @@ components:
     BadRequest:
       description: >-
         Richiesta non valida. `code`: validation_error,
-        missing_idempotency_key, invalid_idempotency_key (oltre 128 caratteri).
+        missing_idempotency_key, invalid_idempotency_key (oltre 128 caratteri),
+        invalid_amount, invalid_channel, invalid_status, empty_flow,
+        duplicate_step_order.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -575,7 +580,8 @@ components:
     EntitlementError:
       description: >-
         Autorizzazione insufficiente. `code`: entitlement_missing (nessun
-        entitlement IREC), scope_missing (scope richiesto assente dal token).
+        entitlement IREC), scope_missing (scope richiesto assente dal token),
+        upgrade_required (funzione non nel pacchetto del mandante).
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -588,8 +594,8 @@ components:
       description: >-
         Stato incompatibile con l'azione. `code`: invoice_not_pausable,
         invoice_not_paused, invoice_not_active, invoice_already_paid,
-        communication_not_cancellable, communication_not_forceable,
-        channel_unavailable, run_in_progress.
+        invoice_in_recovery, communication_not_cancellable,
+        communication_not_forceable, channel_unavailable, run_in_progress.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -771,8 +777,8 @@ components:
           items:
             type: object
             properties:
-              label: { type: string, examples: ['0-30', '31-60', '61-90', '90+'] }
-              importo: { type: number }
+              label: { type: string, examples: ['a_scadere', '0-30', '31-60', '61-90', '90+'] }
+              importo: { type: string, format: decimal }
               numero_fatture: { type: integer }
 
     Usage:
