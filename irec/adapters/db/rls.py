@@ -76,3 +76,23 @@ def enable_rls(engine: Engine) -> None:
     with engine.begin() as connection:
         for statement in rls_statements_for(None):
             connection.execute(text(statement))
+
+
+def connection_bypasses_rls(engine: Engine) -> bool | None:
+    """True se l'utente della connessione bypassa la RLS.
+
+    I superuser e i ruoli con BYPASSRLS ignorano le policy: con un ruolo
+    così la quarta rete è silenziosamente inerte. None su dialetti non
+    Postgres (dove la RLS non esiste).
+    """
+    if engine.dialect.name != "postgresql":
+        return None
+    with engine.connect() as connection:
+        return bool(
+            connection.execute(
+                text(
+                    "SELECT rolsuper OR rolbypassrls FROM pg_roles "
+                    "WHERE rolname = current_user"
+                )
+            ).scalar()
+        )

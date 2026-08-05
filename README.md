@@ -29,7 +29,9 @@ Python 3.12 · FastAPI · Pydantic · SQLAlchemy/Alembic · Postgres · Docker.
 | `IREC_JWKS_URL` | — | JWKS pubblico con cui IREC verifica i call-token firmati da Mind. Deve essere `https://` (http solo per localhost). **Se assente**: le rotte protette rispondono `503 auth_not_configured` e `/ready` è 503. |
 | `IREC_TOKEN_AUDIENCE` | `irec` | Valore atteso del claim `aud`. |
 | `IREC_LOG_LEVEL` | `INFO` | Livello di log (output JSON strutturato). |
-| `IREC_DATABASE_URL` | — | Postgres di IREC. **Se assente**: le rotte dati rispondono `503 database_not_configured` e `/ready` è 503. |
+| `IREC_DATABASE_URL` | — | Postgres di IREC. **Se assente**: le rotte dati rispondono `503 database_not_configured` e `/ready` è 503. Il ruolo deve essere NON privilegiato (superuser = RLS inerte: warning in dev, blocco in production). |
+| `IREC_PROVIDERS` | `mock` | Provider dei microservizi esterni: `mock` (sviluppo, scenario demo) o `reali` (M8). In `production` i mock bloccano lo startup. |
+| `IREC_APP_DB_PASSWORD` | `irec_app_dev_only` | Solo per `docker compose`: password del ruolo applicativo `irec_app`. |
 | `IREC_DB_PASSWORD` | `irec_dev_only` | Solo per `docker compose`: password del Postgres locale. |
 | `IREC_TEST_DATABASE_URL` | — | Solo per i test: Postgres su cui rieseguire la suite di persistenza. Se assente, quei test girano solo su SQLite. |
 
@@ -66,7 +68,8 @@ Migrazioni del database (richiede `IREC_DATABASE_URL`):
 - ✅ **M0 — Fondazioni**: scaffold FastAPI, auth call-token via JWKS (aud/exp/entitlement/tenant), logging JSON con `x-correlation-id`, errori `{error, code}`, `/health` + `/ready`, Docker, CI.
 - ✅ **M1 — Modello dati e persistenza**: schema Postgres delle entità del PRD con migrazioni Alembic, repository con isolamento per tenant, audit trail, cancellazione GDPR (`DELETE /v1/tenant`), `/ready` che verifica il database. Include il backlog di hardening R1 della review M0.
 - ✅ **M2 — Adapter dei microservizi esterni (mock-first)**: porte in [irec/domain/porte.py](irec/domain/porte.py) (`FattureProvider`, `MovimentiProvider`, `Riconciliatore`) e mock pilotabili per scenario in [irec/adapters/mock/](irec/adapters/mock/) (collegamenti caduti, latenza SDI, pagamenti parziali, bonifici cumulativi, duplicati). Più RLS Postgres come quarta rete di isolamento, lint di layering, mypy strict e coverage in CI.
-- ▶️ Prossima: **M3 — Ciclo giornaliero di sincronizzazione** (vedi [docs/ROADMAP.md](docs/ROADMAP.md)).
+- ✅ **M3 — Ciclo giornaliero di sincronizzazione**: [irec/services/sync.py](irec/services/sync.py) orchestra collegamenti → import fatture (con schedule dal flusso di default) → riconciliazione → stati, tutto idempotente e rieseguibile. Run asincrone via `POST /v1/reconciliations` (202 + `run_id`, `Idempotency-Key`). Provider selezionati da `IREC_PROVIDERS` con fail-fast se production seleziona i mock.
+- ▶️ Prossima: **M4 — Motore solleciti** (vedi [docs/ROADMAP.md](docs/ROADMAP.md)).
 
 Decisioni ancora aperte (vedi [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), sezione "Punti aperti"):
 

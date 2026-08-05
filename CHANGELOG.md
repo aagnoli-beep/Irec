@@ -8,6 +8,12 @@ modo additivo.
 
 ### Contratto `/v1` — versione `1.0.0-draft.1` (bozza, non ancora concordata con Mind)
 
+- Implementati `POST /v1/reconciliations` (202 + `run_id`, `Idempotency-Key`
+  obbligatoria con retry che restituisce la stessa run) e
+  `GET /v1/reconciliations/{run_id}`; contratto allineato all'esito reale
+  della run (conteggi e codici anomalia, `status` `queued/running/
+  completed/failed`, esempi inclusi). Un run_id altrui risponde 404.
+
 - `DELETE /v1/tenant` richiede lo scope `irec.tenant.delete` e dichiara il
   `503`; documentato il `code` `scope_missing` fra gli errori 403.
 - Gli importi di `Invoice` viaggiano come stringhe decimali invece che come
@@ -24,6 +30,16 @@ modo additivo.
 
 ### Servizio
 
+- **M3** — ciclo giornaliero di sincronizzazione (`irec/services/sync.py`):
+  verifica collegamenti → import fatture (clienti/posizioni/schedule dal
+  flusso di default, reimport idempotente, anomalia su fatture già scadute)
+  → riconciliazione (pagamenti idempotenti per movimento+fattura, movimenti
+  ridotti di quanto già allocato nei run precedenti) → stati e chiusura
+  posizioni, tutto nell'audit trail. Run asincrone su tabella `sync_run`
+  (migrazione `ed1582b4f518`, con RLS). Selettore provider mock/reali con
+  fail-fast in production; check del ruolo database (superuser = RLS
+  inerte): warning in dev, blocco in production; compose con ruolo
+  applicativo non privilegiato e servizio su loopback.
 - **M2** — porte dei tre microservizi esterni (`irec/domain/porte.py`) e
   adapter mock pilotabili per scenario (`irec/adapters/mock/`): collegamenti
   non attivi, latenza SDI, pagamenti parziali, bonifici cumulativi FIFO,

@@ -39,6 +39,7 @@ from irec.domain.enums import (
     StatoComunicazione,
     StatoFattura,
     StatoPosizione,
+    StatoRun,
     TipoEvento,
 )
 
@@ -325,6 +326,32 @@ class Pagamento(TenantScoped, Base):
     operatore: Mapped[str | None] = mapped_column(OPERATORE)
 
     fattura: Mapped[Fattura] = relationship(back_populates="pagamenti")
+
+
+class SyncRun(TenantScoped, Base):
+    """Run asincrona del ciclo di sincronizzazione (202 + run_id, brief §4).
+
+    `chiave_idempotenza` è l'Idempotency-Key della richiesta: un retry con
+    la stessa chiave restituisce la stessa run, mai una seconda esecuzione.
+    """
+
+    __tablename__ = "sync_run"
+    __table_args__ = (
+        tenant_pk("sync_run"),
+        UniqueConstraint(
+            "tenant_id", "chiave_idempotenza", name="uq_sync_run_tenant_chiave"
+        ),
+    )
+
+    stato: Mapped[StatoRun] = mapped_column(enum_col(StatoRun), default=StatoRun.QUEUED)
+    chiave_idempotenza: Mapped[str] = mapped_column(String(128))
+    avviata_da: Mapped[str | None] = mapped_column(OPERATORE)
+    avviata_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    conclusa_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Esito serializzato (conteggi, stati collegamenti, anomalie): nessuna
+    # PII, solo numeri e codici.
+    risultato: Mapped[dict[str, object] | None] = mapped_column(JSON)
+    errore: Mapped[str | None] = mapped_column(String(255))
 
 
 class AuditLog(TenantScoped, Base):

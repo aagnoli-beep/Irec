@@ -11,7 +11,7 @@ from fastapi import Depends
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
 from sqlalchemy.exc import OperationalError
-from sqlalchemy.pool import NullPool, StaticPool
+from sqlalchemy.pool import NullPool
 
 from irec.adapters.db.models import Base
 from irec.adapters.db.repository import TenantRepository
@@ -88,19 +88,23 @@ def _abilita_foreign_key_sqlite(engine) -> None:
 
 
 @pytest.fixture(params=["sqlite", "postgres"])
-def db_engine(request):
+def db_engine(request, tmp_path):
     """Database di test reale, non un mock della sessione.
 
     Ogni test gira su entrambi i motori: SQLite per la velocità, Postgres
     (quello di produzione) perché SQLite non applica le larghezze delle
     colonne e tratta diversamente alcuni vincoli. Se Postgres non è
     disponibile in locale il parametro viene saltato, ma in CI c'è sempre.
+
+    SQLite su FILE, non in-memory: l'in-memory obbligherebbe a un'unica
+    connessione condivisa (StaticPool) e le transazioni di sessioni
+    diverse si calpesterebbero — esattamente ciò che in produzione non
+    accade. Con il file ogni sessione ha la sua connessione.
     """
     if request.param == "sqlite":
         engine = create_engine(
-            "sqlite://",
+            f"sqlite:///{tmp_path}/test.db",
             connect_args={"check_same_thread": False},
-            poolclass=StaticPool,
         )
         _abilita_foreign_key_sqlite(engine)
     else:

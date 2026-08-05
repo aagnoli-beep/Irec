@@ -161,6 +161,15 @@ perdita); l'**infrastruttura è in inglese**, helper privati inclusi
 in italiano, campi di protocollo/envelope in inglese (`run_id`, `status`,
 `error`).
 
+## 6-bis. Layer applicativo
+
+`irec/services/` orchestra dominio e adapter (chi chiamare, in che ordine,
+cosa persistere); le REGOLE stanno in `domain/`, l'IO negli `adapters/`.
+Direzione delle dipendenze: `api → services → (domain, adapters)`, mai il
+contrario. Il ciclo giornaliero (`services/sync.py`) dipende dalle porte,
+non dai mock: la scelta mock/reali avviene in `adapters/providers.py` allo
+startup, con fail-fast se un ambiente production seleziona i mock.
+
 ## 7. Cosa NON fare (lista nera dal brief)
 
 - ❌ Connettersi al DB di Mind (Supabase).

@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     # Postgres (da M1 in poi).
     database_url: str | None = None
 
+    # Provider dei microservizi esterni: "mock" (sviluppo) | "reali" (M8).
+    # In production i mock bloccano lo startup.
+    providers: str = "mock"
+
 
 @lru_cache
 def get_settings() -> Settings:

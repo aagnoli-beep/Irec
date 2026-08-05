@@ -23,7 +23,12 @@ def create_db_engine(database_url: str) -> Engine:
     return create_engine(database_url, **_ENGINE_OPTIONS)
 
 
-def create_session_factory(engine: Engine) -> sessionmaker[Session]:
+# Alias per i layer superiori: possono tipizzare la factory senza
+# importare SQLAlchemy (vietato fuori da adapters/db dal lint TID251).
+SessionFactory = sessionmaker[Session]
+
+
+def create_session_factory(engine: Engine) -> SessionFactory:
     """Factory di sessioni; gli oggetti restano usabili dopo il commit."""
     return sessionmaker(bind=engine, expire_on_commit=False)
 

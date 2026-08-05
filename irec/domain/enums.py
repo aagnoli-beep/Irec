@@ -57,6 +57,15 @@ class OriginePagamento(StrEnum):
     MANUALE = "manuale"
 
 
+class StatoRun(StrEnum):
+    """Stati di una run di sincronizzazione (contratto /v1: valori inglesi)."""
+
+    QUEUED = "queued"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 class TipoEvento(StrEnum):
     """Eventi dell'audit trail (PRD 5.4): storico immutabile."""
 

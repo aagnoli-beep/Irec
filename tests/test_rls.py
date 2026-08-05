@@ -203,7 +203,8 @@ def test_migrazione_rls_su_postgres():
             )
         assert con_policy == set(Base.metadata.tables)
 
-        result = alembic("downgrade", "-1")
+        # Fino a PRIMA della revisione RLS: tutte le policy devono sparire.
+        result = alembic("downgrade", "8e1021f67739")
         assert result.returncode == 0, result.stderr
         with engine.connect() as connection:
             residue = connection.execute(

@@ -13,6 +13,7 @@ from irec.adapters.db.models import (
     Mandante,
     Pagamento,
     Posizione,
+    SyncRun,
 )
 from irec.adapters.db.repository import TenantRepository
 from irec.adapters.db.session import session_scope
@@ -109,6 +110,12 @@ def make_pagamento(fattura_id: str, **overrides) -> Pagamento:
     return Pagamento(**valori)
 
 
+def make_sync_run(**overrides) -> SyncRun:
+    valori = {"chiave_idempotenza": "run-0001"}
+    valori.update(overrides)
+    return SyncRun(**valori)
+
+
 def make_audit(**overrides) -> AuditLog:
     valori = {
         "tipo": TipoEvento.TRANSIZIONE_STATO,
@@ -145,6 +152,7 @@ def popola_tenant(session_factory, tenant_id: str, **overrides) -> dict[str, str
         comunicazione = repo.add(make_comunicazione(fattura.id, step_id=step.id))
         pagamento = repo.add(make_pagamento(fattura.id))
         audit = repo.add(make_audit(entita_id=fattura.id))
+        run = repo.add(make_sync_run())
         repo.flush()
         return {
             "mandante": mandante.id,
@@ -156,4 +164,5 @@ def popola_tenant(session_factory, tenant_id: str, **overrides) -> dict[str, str
             "comunicazione": comunicazione.id,
             "pagamento": pagamento.id,
             "audit": audit.id,
+            "run": run.id,
         }

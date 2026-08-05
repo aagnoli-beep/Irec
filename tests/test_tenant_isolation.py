@@ -19,6 +19,7 @@ from irec.adapters.db.models import (
     Mandante,
     Pagamento,
     Posizione,
+    SyncRun,
 )
 from irec.adapters.db.repository import TenantRepository, TenantViolation
 from irec.adapters.db.session import session_scope
@@ -34,6 +35,7 @@ TUTTI_I_MODELLI = [
     Comunicazione,
     Pagamento,
     AuditLog,
+    SyncRun,
 ]
 
 
@@ -62,6 +64,7 @@ class TestLettura:
             Comunicazione: "comunicazione",
             Pagamento: "pagamento",
             AuditLog: "audit",
+            SyncRun: "run",
         }[model]
 
         with session_scope(session_factory) as session:

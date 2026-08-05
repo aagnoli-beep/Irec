@@ -50,23 +50,36 @@ paths:
   /reconciliations:
     post:
       operationId: startReconciliation
-      summary: Avvia una run di riconciliazione incassi↔fatture
+      summary: Avvia una run del ciclo di sincronizzazione e riconciliazione
+      description: >-
+        Verifica collegamenti (AdE, PSD2), recupera fatture e movimenti,
+        riconcilia e applica gli esiti. Un retry con la stessa
+        `Idempotency-Key` restituisce la stessa run, mai una seconda
+        esecuzione.
       parameters:
         - $ref: '#/components/parameters/CorrelationId'
         - $ref: '#/components/parameters/IdempotencyKey'
       responses:
         '202':
-          description: Run avviata
+          description: Run accettata
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/RunAccepted'
+              example:
+                run_id: "0f8a1c2d3e4b5a697887a6b5c4d3e2f1"
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/EntitlementError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
 
   /reconciliations/{run_id}:
     get:
       operationId: getReconciliation
-      summary: Stato e risultato di una run (match / unmatched / confidence)
+      summary: Stato e risultato di una run del proprio tenant
+      description: >-
+        Un run_id di un altro tenant è indistinguibile da un id
+        inesistente (404).
       parameters:
         - $ref: '#/components/parameters/CorrelationId'
         - name: run_id
@@ -80,7 +93,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReconciliationRun'
+              example:
+                run_id: "0f8a1c2d3e4b5a697887a6b5c4d3e2f1"
+                status: completed
+                errore: null
+                risultato:
+                  collegamento_ade: attivo
+                  consenso_psd2: attivo
+                  fatture_recuperate: 4
+                  fatture_importate: 4
+                  clienti_creati: 2
+                  comunicazioni_programmate: 36
+                  movimenti_recuperati: 3
+                  pagamenti_registrati: 3
+                  fatture_saldate: 2
+                  comunicazioni_annullate: 18
+                  posizioni_chiuse: 1
+                  anomalie: ["fattura_gia_scaduta:32-FA"]
+        '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
 
   /invoices:
     get:
@@ -302,16 +334,35 @@ components:
 
     ReconciliationRun:
       type: object
+      required: [run_id, status]
       properties:
         run_id: { type: string }
         status:
           type: string
-          enum: [pending, running, completed, failed]
-        result:
-          type: object
+          enum: [queued, running, completed, failed]
+        errore:
+          type: [string, 'null']
+          description: Tipo dell'errore (mai dettagli interni), solo per status=failed.
+        risultato:
+          type: [object, 'null']
+          description: >-
+            Riepilogo della run: conteggi, stati dei collegamenti e codici
+            anomalia. Nessun dato personale.
           properties:
-            matched: { type: array, items: { type: object } }
-            unmatched: { type: array, items: { type: object } }
+            collegamento_ade: { type: string }
+            consenso_psd2: { type: string }
+            fatture_recuperate: { type: integer }
+            fatture_importate: { type: integer }
+            clienti_creati: { type: integer }
+            comunicazioni_programmate: { type: integer }
+            movimenti_recuperati: { type: integer }
+            pagamenti_registrati: { type: integer }
+            fatture_saldate: { type: integer }
+            comunicazioni_annullate: { type: integer }
+            posizioni_chiuse: { type: integer }
+            anomalie:
+              type: array
+              items: { type: string }
 
     Invoice:
       type: object

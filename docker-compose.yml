@@ -4,10 +4,14 @@ services:
   irec:
     build: .
     ports:
-      - "8000:8000"
+      # Solo loopback, come il database.
+      - "127.0.0.1:8000:8000"
     environment:
       IREC_JWKS_URL: ${IREC_JWKS_URL:-}
-      IREC_DATABASE_URL: postgresql+psycopg://irec:${IREC_DB_PASSWORD:-irec_dev_only}@db:5432/irec
+      # Ruolo applicativo NON privilegiato (creato da infra/initdb): la RLS
+      # non si applica ai superuser. Le migrazioni usano l'utente admin:
+      #   IREC_DATABASE_URL=postgresql+psycopg://irec:<pw>@localhost:5432/irec alembic upgrade head
+      IREC_DATABASE_URL: postgresql+psycopg://irec_app:${IREC_APP_DB_PASSWORD:-irec_app_dev_only}@db:5432/irec
       IREC_LOG_LEVEL: ${IREC_LOG_LEVEL:-INFO}
     depends_on:
       - db
@@ -24,6 +28,7 @@ services:
       - "127.0.0.1:5432:5432"
     volumes:
       - irec_pgdata:/var/lib/postgresql/data
+      - ./infra/initdb:/docker-entrypoint-initdb.d:ro
 
 volumes:
   irec_pgdata:
