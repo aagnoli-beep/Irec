@@ -127,6 +127,7 @@ paths:
                   comunicazioni_saltate: 0
                   comunicazioni_fallite: 0
                   segnalazioni: []
+                  notifiche_generate: 1
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/EntitlementError' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -488,6 +489,65 @@ paths:
         '403': { $ref: '#/components/responses/EntitlementError' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
 
+  /brief:
+    get:
+      operationId: getBrief
+      summary: Brief giornaliero — KPI + azioni proposte (max 3)
+      description: >-
+        Solo numeri e codici: il tono lo mette l'LLM di Mind (addendum §5.2).
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Brief del tenant
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Brief' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/EntitlementError' }
+
+  /notifications:
+    get:
+      operationId: getNotifications
+      summary: Notifiche proattive non lette (polling di Mind)
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Notifiche in attesa
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Notifiche' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/EntitlementError' }
+
+  /notifications/ack:
+    post:
+      operationId: ackNotifications
+      summary: Conferma la ricezione delle notifiche (le marca come lette)
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              properties:
+                ids: { type: array, items: { type: string } }
+      responses:
+        '200':
+          description: Notifiche marcate come lette
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  marcate: { type: integer }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/EntitlementError' }
+
   # Gli endpoint operativi vivono alla root, fuori dal prefisso /v1
   # (server override per-path).
   /health:
@@ -685,6 +745,42 @@ components:
         gia_registrato: { type: boolean }
         comunicazioni_annullate: { type: integer }
 
+    Brief:
+      type: object
+      required: [affidato, recuperato, da_recuperare, passato_a_recupero]
+      properties:
+        affidato: { type: string, format: decimal }
+        recuperato: { type: string, format: decimal }
+        da_recuperare: { type: string, format: decimal }
+        passato_a_recupero: { type: string, format: decimal }
+        azioni_principali:
+          type: array
+          items:
+            type: object
+            properties:
+              tipo:
+                type: string
+                enum: [escalation_imminente, consenso_psd2, collegamento_ade, escalation_eseguita, dato_in_ritardo]
+              quante: { type: integer }
+        altre_azioni: { type: integer }
+
+    Notifiche:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, tipo, riferimento, created_at]
+            properties:
+              id: { type: string }
+              tipo:
+                type: string
+                enum: [escalation_imminente, consenso_psd2, collegamento_ade, escalation_eseguita, dato_in_ritardo]
+              riferimento: { type: string }
+              dettaglio: { type: [string, 'null'] }
+              created_at: { type: string, format: date-time }
+
     RunAccepted:
       type: object
       required: [run_id]
@@ -750,6 +846,7 @@ components:
                 `escalation_senza_mail_mandante:<fattura_id>`). Riferimenti
                 per id opaco, nessun numero fattura o importo.
               items: { type: string }
+            notifiche_generate: { type: integer }
 
     Invoice:
       type: object

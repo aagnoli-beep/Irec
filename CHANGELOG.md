@@ -8,6 +8,12 @@ modo additivo.
 
 ### Contratto `/v1` — versione `1.0.0-draft.1` (bozza, non ancora concordata con Mind)
 
+- **M6** — endpoint proattivi: `GET /v1/brief` (KPI + azioni proposte, max 3,
+  tono a carico dell'LLM di Mind), `GET /v1/notifications` (coda non letta,
+  polling) e `POST /v1/notifications/ack` (conferma ricezione). L'esito della
+  run espone `notifiche_generate`. Consegna via polling; il webhook resta da
+  concordare col team Mind.
+
 - **M5** — implementati gli endpoint dei tool dell'agente: letture autonome
   (`GET /v1/portfolio`, `/aging`, `/invoices`, `/positions/{id}`,
   `/invoices/{id}/history`, `/invoices/{id}/next`,
@@ -53,6 +59,14 @@ modo additivo.
 
 ### Servizio
 
+- **M6** — proattività e reporting: brief giornaliero (`irec/domain/brief.py`
+  puro, tono ibrido con positivo per primo e tetto di 2-3 azioni;
+  `irec/services/reporting.py` lo unisce ai KPI) e notifiche proattive
+  (`irec/services/notifiche.py`): escalation imminente T+44, consenso PSD2 da
+  rinnovare, delega AdE caduta — generate nel ciclo giornaliero, deduplicate
+  per chiave (la stessa situazione non rigenera; una notifica letta viene
+  resuscitata se la situazione torna), consegnate in polling. Tabella
+  `notifica` con RLS (migrazione `26814ec71749`).
 - **M5** — API `/v1` complete per i tool di Mind: letture
   (`irec/services/letture.py`: KPI, aging, spiegazione comunicazioni,
   consumo) e azioni con conferma (`irec/services/azioni.py`: pausa/riprendi,

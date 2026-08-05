@@ -41,6 +41,7 @@ from irec.domain.enums import (
     StatoPosizione,
     StatoRun,
     TipoEvento,
+    TipoNotifica,
 )
 
 IMPORTO = Numeric(14, 2)
@@ -352,6 +353,28 @@ class SyncRun(TenantScoped, Base):
     # PII, solo numeri e codici.
     risultato: Mapped[dict[str, object] | None] = mapped_column(JSON)
     errore: Mapped[str | None] = mapped_column(String(255))
+
+
+class Notifica(TenantScoped, Base):
+    """Notifica proattiva in attesa di consegna (Mind la legge in polling).
+
+    `chiave` deduplica: la stessa situazione (tipo + riferimento) non
+    genera una notifica a ogni ciclo giornaliero. `riferimento` è un id
+    opaco (fattura, collegamento), mai PII.
+    """
+
+    __tablename__ = "notifica"
+    __table_args__ = (
+        tenant_pk("notifica"),
+        UniqueConstraint("tenant_id", "chiave", name="uq_notifica_tenant_chiave"),
+        Index("ix_notifica_tenant_letta", "tenant_id", "letta_at"),
+    )
+
+    tipo: Mapped[TipoNotifica] = mapped_column(enum_col(TipoNotifica))
+    riferimento: Mapped[str] = mapped_column(String(64))
+    chiave: Mapped[str] = mapped_column(String(128))
+    dettaglio: Mapped[str | None] = mapped_column(String(255))
+    letta_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class AuditLog(TenantScoped, Base):

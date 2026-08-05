@@ -17,6 +17,7 @@ from irec.adapters.db.models import (
     Flusso,
     FlussoStep,
     Mandante,
+    Notifica,
     Pagamento,
     Posizione,
     SyncRun,
@@ -36,6 +37,7 @@ TUTTI_I_MODELLI = [
     Pagamento,
     AuditLog,
     SyncRun,
+    Notifica,
 ]
 
 
@@ -65,6 +67,7 @@ class TestLettura:
             Pagamento: "pagamento",
             AuditLog: "audit",
             SyncRun: "run",
+            Notifica: "notifica",
         }[model]
 
         with session_scope(session_factory) as session:

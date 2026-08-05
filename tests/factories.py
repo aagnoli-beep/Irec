@@ -11,6 +11,7 @@ from irec.adapters.db.models import (
     Flusso,
     FlussoStep,
     Mandante,
+    Notifica,
     Pagamento,
     Posizione,
     SyncRun,
@@ -110,6 +111,18 @@ def make_pagamento(fattura_id: str, **overrides) -> Pagamento:
     return Pagamento(**valori)
 
 
+def make_notifica(**overrides) -> Notifica:
+    from irec.domain.enums import TipoNotifica
+
+    valori = {
+        "tipo": TipoNotifica.ESCALATION_IMMINENTE,
+        "riferimento": "fatt-1",
+        "chiave": "escalation_imminente:fatt-1",
+    }
+    valori.update(overrides)
+    return Notifica(**valori)
+
+
 def make_sync_run(**overrides) -> SyncRun:
     valori = {"chiave_idempotenza": "run-0001"}
     valori.update(overrides)
@@ -153,6 +166,7 @@ def popola_tenant(session_factory, tenant_id: str, **overrides) -> dict[str, str
         pagamento = repo.add(make_pagamento(fattura.id))
         audit = repo.add(make_audit(entita_id=fattura.id))
         run = repo.add(make_sync_run())
+        notifica = repo.add(make_notifica(riferimento=fattura.id))
         repo.flush()
         return {
             "mandante": mandante.id,
@@ -165,4 +179,5 @@ def popola_tenant(session_factory, tenant_id: str, **overrides) -> dict[str, str
             "pagamento": pagamento.id,
             "audit": audit.id,
             "run": run.id,
+            "notifica": notifica.id,
         }

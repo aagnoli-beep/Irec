@@ -143,7 +143,8 @@ successiva.
 | M3 — Ciclo giornaliero | ✅ | [2026-08-05-M3.md](reviews/2026-08-05-M3.md) — R6 eseguito |
 | M4 — Motore solleciti | ✅ | [2026-08-05-M4.md](reviews/2026-08-05-M4.md) — R7 eseguito |
 | M5 — API `/v1` per Mind | ✅ | [2026-08-05-M5.md](reviews/2026-08-05-M5.md) — R8 eseguito |
-| M6 — Proattività e reporting | ▶️ prossima | — |
+| M6 — Proattività e reporting | ✅ | [2026-08-05-M6.md](reviews/2026-08-05-M6.md) |
+| M7 — Onboarding guidato | ▶️ prossima | — |
 
 ## Fase 2 (fuori perimetro MVP)
 

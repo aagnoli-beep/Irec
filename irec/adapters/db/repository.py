@@ -30,6 +30,7 @@ from irec.adapters.db.models import (
     Flusso,
     FlussoStep,
     Mandante,
+    Notifica,
     Pagamento,
     Posizione,
     SyncRun,
@@ -47,6 +48,7 @@ TENANT_SESSION_KEY = "irec_tenant_id"
 # Ordine di cancellazione GDPR: dalle foglie alla radice, così le FK
 # reggono anche sui database senza ON DELETE CASCADE attivo.
 _DELETION_ORDER: tuple[type[TenantScoped], ...] = (
+    Notifica,
     SyncRun,
     AuditLog,
     Pagamento,

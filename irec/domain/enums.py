@@ -70,6 +70,27 @@ class StatoRun(StrEnum):
     FAILED = "failed"
 
 
+class TipoNotifica(StrEnum):
+    """Notifiche proattive verso l'utente (addendum §6.4), in ordine di
+    priorità per il brief giornaliero."""
+
+    ESCALATION_IMMINENTE = "escalation_imminente"  # T+44: domani parte
+    CONSENSO_PSD2 = "consenso_psd2"  # da riautorizzare
+    COLLEGAMENTO_ADE = "collegamento_ade"  # delega non attiva
+    ESCALATION_ESEGUITA = "escalation_eseguita"  # passata a Recupero Crediti
+    DATO_IN_RITARDO = "dato_in_ritardo"  # sincronizzazione oltre SLA
+
+
+# Ordine con cui le notifiche diventano "azioni proposte" nel brief.
+PRIORITA_NOTIFICHE: tuple[TipoNotifica, ...] = (
+    TipoNotifica.ESCALATION_IMMINENTE,
+    TipoNotifica.CONSENSO_PSD2,
+    TipoNotifica.COLLEGAMENTO_ADE,
+    TipoNotifica.ESCALATION_ESEGUITA,
+    TipoNotifica.DATO_IN_RITARDO,
+)
+
+
 class TipoEvento(StrEnum):
     """Eventi dell'audit trail (PRD 5.4): storico immutabile."""
 

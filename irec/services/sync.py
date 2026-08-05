@@ -34,6 +34,7 @@ from irec.domain.enums import (
     StatoFattura,
     StatoPosizione,
     TipoEvento,
+    TipoNotifica,
 )
 from irec.domain.flusso_default import (
     FLUSSO_DEFAULT,
@@ -41,6 +42,7 @@ from irec.domain.flusso_default import (
     data_invio_pianificata,
 )
 from irec.domain.porte import (
+    CollegamentoEsterno,
     ErroreCollegamento,
     FatturaEsterna,
     FattureProvider,
@@ -57,6 +59,10 @@ from irec.domain.stati import (
     stato_posizione,
 )
 from irec.services.invii import MotoreInvii
+from irec.services.notifiche import (
+    genera_notifiche_escalation,
+    notifica_collegamento,
+)
 
 # Factory, non istanza: il motore va costruito al momento della run
 # (l'"adesso" è suo), non alla costruzione del ciclo.
@@ -94,6 +100,7 @@ class EsitoSincronizzazione:
     comunicazioni_saltate: int = 0
     comunicazioni_fallite: int = 0
     segnalazioni: list[str] = field(default_factory=list)
+    notifiche_generate: int = 0
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -117,6 +124,7 @@ class EsitoSincronizzazione:
             "comunicazioni_saltate": self.comunicazioni_saltate,
             "comunicazioni_fallite": self.comunicazioni_fallite,
             "segnalazioni": list(self.segnalazioni),
+            "notifiche_generate": self.notifiche_generate,
         }
 
 
@@ -138,6 +146,9 @@ class CicloSincronizzazione:
         self._oggi = oggi
         self._lookback = timedelta(days=lookback_giorni)
         self._motore_invii = motore_invii
+        # Collegamenti catturati durante la run, per le notifiche proattive.
+        self._collegamento_ade: CollegamentoEsterno | None = None
+        self._consenso_psd2: CollegamentoEsterno | None = None
 
     def esegui(self, repo: TenantRepository) -> EsitoSincronizzazione:
         esito = EsitoSincronizzazione()
@@ -151,6 +162,7 @@ class CicloSincronizzazione:
         self._riconcilia(repo, esito)
         self._aggiorna_posizioni(repo, esito)
         self._esegui_invii(repo, esito)
+        self._genera_notifiche(repo, esito)
 
         repo.log_event(
             TipoEvento.SINCRONIZZAZIONE,
@@ -164,6 +176,25 @@ class CicloSincronizzazione:
             ),
         )
         return esito
+
+    def _genera_notifiche(
+        self, repo: TenantRepository, esito: EsitoSincronizzazione
+    ) -> None:
+        """Notifiche proattive (M6): collegamenti caduti, preavvisi T+44.
+
+        Deduplicate per chiave: la stessa situazione non rigenera una
+        notifica a ogni ciclo. La consegna è in polling da parte di Mind.
+        """
+        if self._collegamento_ade is not None:
+            notifica_collegamento(
+                repo, TipoNotifica.COLLEGAMENTO_ADE, self._collegamento_ade
+            )
+        if self._consenso_psd2 is not None:
+            notifica_collegamento(
+                repo, TipoNotifica.CONSENSO_PSD2, self._consenso_psd2
+            )
+        esito.notifiche_generate = genera_notifiche_escalation(repo, self._oggi)
+        repo.flush()
 
     def _esegui_invii(self, repo: TenantRepository, esito: EsitoSincronizzazione) -> None:
         """Fase invii (M4): pause, escalation, solleciti consolidati.
@@ -196,6 +227,7 @@ class CicloSincronizzazione:
             collegamento = self._fatture_provider.stato_collegamento(repo.tenant_id)
         except ErroreCollegamento as errore:
             collegamento = errore.collegamento
+        self._collegamento_ade = collegamento
         esito.collegamento_ade = collegamento.stato
         if not collegamento.attivo:
             # Il collegamento caduto non è un errore della run: è lo stato
@@ -333,6 +365,7 @@ class CicloSincronizzazione:
             consenso = self._movimenti_provider.stato_consenso(repo.tenant_id)
         except ErroreCollegamento as errore:
             consenso = errore.collegamento
+        self._consenso_psd2 = consenso
         esito.consenso_psd2 = consenso.stato
         if not consenso.attivo:
             # Le fatture importate restano valide: salta solo l'incasso.
