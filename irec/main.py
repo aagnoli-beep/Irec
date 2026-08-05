@@ -6,7 +6,9 @@ from irec import __version__
 from irec.adapters.db.rls import connection_bypasses_rls
 from irec.adapters.db.session import create_db_engine, create_session_factory
 from irec.adapters.providers import build_providers
+from irec.api.azioni import router as azioni_router
 from irec.api.health import router as health_router
+from irec.api.letture import router as letture_router
 from irec.api.reconciliations import router as reconciliations_router
 from irec.api.tenant import router as tenant_router
 from irec.auth.verifier import CallTokenVerifier
@@ -81,6 +83,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(health_router)
     app.include_router(tenant_router)
     app.include_router(reconciliations_router)
+    app.include_router(letture_router)
+    app.include_router(azioni_router)
     return app
 
 

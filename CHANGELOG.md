@@ -8,6 +8,19 @@ modo additivo.
 
 ### Contratto `/v1` — versione `1.0.0-draft.1` (bozza, non ancora concordata con Mind)
 
+- **M5** — implementati gli endpoint dei tool dell'agente: letture autonome
+  (`GET /v1/portfolio`, `/aging`, `/invoices`, `/positions/{id}`,
+  `/invoices/{id}/history`, `/invoices/{id}/next`,
+  `/communications/{id}/explain`, `/usage`) e azioni con conferma, tutte con
+  scope `irec.write` (`POST /v1/invoices/{id}/pause`, `/resume`,
+  `/communications/{id}/cancel`, `/force`, `/invoices/{id}/payments`,
+  `PATCH /v1/clients/{id}/contacts`, `PUT /v1/flow`, `POST /v1/report`).
+  Permessi per pacchetto enforced nel servizio (Entry che personalizza il
+  flusso → `403 upgrade_required` con invito garbato). Nuova risposta
+  `Conflict` per gli stati incompatibili. Il contratto è ora verificato
+  contro l'implementazione da `tests/test_contract_conformance.py`; `/ingest`
+  resta l'unico endpoint dichiarato ma non implementato (valutazione M8).
+
 - Implementati `POST /v1/reconciliations` (202 + `run_id`, `Idempotency-Key`
   obbligatoria con retry che restituisce la stessa run) e
   `GET /v1/reconciliations/{run_id}`; contratto allineato all'esito reale
@@ -38,6 +51,12 @@ modo additivo.
 
 ### Servizio
 
+- **M5** — API `/v1` complete per i tool di Mind: letture
+  (`irec/services/letture.py`: KPI, aging, spiegazione comunicazioni,
+  consumo) e azioni con conferma (`irec/services/azioni.py`: pausa/riprendi,
+  annulla/forza invio, pagamento manuale idempotente, aggiorna recapiti,
+  sostituisci flusso, report), con i permessi per pacchetto enforced nel
+  servizio. Verifica automatica contratto↔implementazione in CI.
 - **M4** — motore solleciti (`irec/services/invii.py`, regole pure in
   `irec/domain/scheduler.py` e `calendario.py`): calendario italiano
   (festivi nazionali + Pasquetta, finestra ≤18:00 ora italiana, invii

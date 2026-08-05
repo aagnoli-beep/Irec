@@ -48,8 +48,9 @@ jobs:
       - name: Test
         run: pytest -q --cov=irec --cov-report=term-missing --cov-fail-under=85
       - name: Valida openapi.yaml
-        # M5: aggiungere la verifica contratto <-> implementazione.
         run: openapi-spec-validator openapi.yaml
+        # La verifica contratto <-> implementazione è in
+        # tests/test_contract_conformance.py (gira con la suite).
       - name: Audit dipendenze
         # --skip-editable: il pacchetto locale non è su PyPI e non è auditabile.
         # Esce comunque con errore se una dipendenza ha una CVE nota.

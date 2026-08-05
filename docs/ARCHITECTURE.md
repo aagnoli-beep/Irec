@@ -103,6 +103,12 @@ microservizi esterni che orchestra. IREC possiede l'automazione a valle
   conferma esplicita, con rate-limiting **nel tool**.
 - **Reattiva**: tool invocati da Mind su richiesta utente.
 
+Gli endpoint `/v1` che realizzano questi tool sono in `irec/api/letture.py`
+(livello 1, sola lettura) e `irec/api/azioni.py` (livello 2, con scope
+`irec.write` firmato da Mind). Il contratto è verificato contro
+l'implementazione a ogni CI (`tests/test_contract_conformance.py`): una
+rotta non può divergere da `openapi.yaml` in silenzio.
+
 ### Livelli di autonomia (criterio: "cosa succede se l'agente ha capito male?")
 
 | Livello | Azioni | Esempi |

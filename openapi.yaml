@@ -24,6 +24,8 @@ security:
   - callToken: []
 
 paths:
+  # NON ANCORA IMPLEMENTATO: l'ingest diretto di dataset è previsto solo se
+  # servirà accanto al recupero automatico dai microservizi (valutazione M8).
   /ingest:
     post:
       operationId: ingestDataset
@@ -165,9 +167,12 @@ paths:
   /aging:
     get:
       operationId: getAging
-      summary: Bucket di aging del credito (30/60/90+)
+      summary: Bucket di aging del credito (a_scadere, 0-30, 31-60, 61-90, 90+)
       parameters:
         - $ref: '#/components/parameters/CorrelationId'
+        - name: as_of
+          in: query
+          schema: { type: string, format: date }
       responses:
         '200':
           description: Aging del portafoglio del tenant
@@ -175,6 +180,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AgingReport'
+        '401': { $ref: '#/components/responses/Unauthorized' }
 
   /tenant:
     delete:
@@ -224,6 +230,260 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Usage'
+
+  /portfolio:
+    get:
+      operationId: getPortfolio
+      summary: KPI del portafoglio (affidato = recuperato + da recuperare + a recupero)
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: KPI del tenant
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Kpi' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/EntitlementError' }
+
+  /positions/{position_id}:
+    get:
+      operationId: getPosition
+      summary: Dettaglio di una posizione con le sue fatture
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - { name: position_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Posizione
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Position' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /invoices/{invoice_id}/history:
+    get:
+      operationId: getInvoiceHistory
+      summary: Cronologia delle comunicazioni di una fattura
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - { name: invoice_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Storico comunicazioni
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Storico' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /invoices/{invoice_id}/next:
+    get:
+      operationId: getNextCommunications
+      summary: Step programmati futuri di una fattura
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - { name: invoice_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Prossimi invii
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProssimiInvii' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /communications/{communication_id}/explain:
+    get:
+      operationId: explainCommunication
+      summary: Perché una comunicazione è (o non è) partita
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - { name: communication_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Codice di spiegazione
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [comunicazione_id, codice]
+                properties:
+                  comunicazione_id: { type: string }
+                  codice: { type: string }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /invoices/{invoice_id}/pause:
+    post:
+      operationId: pauseInvoice
+      summary: Sospende il flusso su una fattura (scope irec.write)
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - { name: invoice_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                fino_a: { type: [string, 'null'], format: date }
+                motivo: { type: string }
+      responses:
+        '200':
+          description: Nuovo stato della fattura
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceState' }
+        '403': { $ref: '#/components/responses/EntitlementError' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /invoices/{invoice_id}/resume:
+    post:
+      operationId: resumeInvoice
+      summary: Riprende il flusso su una fattura in pausa (scope irec.write)
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - { name: invoice_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Nuovo stato della fattura
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceState' }
+        '403': { $ref: '#/components/responses/EntitlementError' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /communications/{communication_id}/cancel:
+    post:
+      operationId: cancelCommunication
+      summary: Annulla un singolo step programmato (scope irec.write)
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - { name: communication_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '403': { $ref: '#/components/responses/EntitlementError' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /communications/{communication_id}/force:
+    post:
+      operationId: forceCommunication
+      summary: Forza l'invio immediato di uno step (scope irec.write)
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - { name: communication_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '403': { $ref: '#/components/responses/EntitlementError' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+
+  /invoices/{invoice_id}/payments:
+    post:
+      operationId: registerPayment
+      summary: Registra un pagamento manuale, idempotente (scope irec.write)
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - { name: invoice_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [importo, data_pagamento, idempotency_key]
+              properties:
+                importo: { type: string, format: decimal }
+                data_pagamento: { type: string, format: date }
+                idempotency_key: { type: string }
+      responses:
+        '200':
+          description: Esito del pagamento
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PagamentoManuale' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/EntitlementError' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /clients/{client_id}/contacts:
+    patch:
+      operationId: updateContacts
+      summary: Aggiorna i recapiti di un cliente (scope irec.write)
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+        - { name: client_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email: { type: [string, 'null'] }
+                pec: { type: [string, 'null'] }
+                telefono: { type: [string, 'null'] }
+                canali_opt_out: { type: [array, 'null'], items: { type: string } }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/EntitlementError' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /flow:
+    put:
+      operationId: replaceFlow
+      summary: Sostituisce il flusso del mandante (Value/Premium, scope irec.write)
+      description: >-
+        La personalizzazione del flusso è disponibile dal pacchetto Value:
+        un mandante Entry riceve 403 `upgrade_required` con invito garbato.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [steps]
+              properties:
+                steps:
+                  type: array
+                  items:
+                    type: object
+                    required: [ordine, offset_giorni, canale, template]
+                    properties:
+                      ordine: { type: integer }
+                      offset_giorni: { type: integer }
+                      canale: { type: string, enum: [email, pec, whatsapp, voice] }
+                      template: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/Ok' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { $ref: '#/components/responses/EntitlementError' }
+
+  /report:
+    post:
+      operationId: sendReport
+      summary: Genera e invia il report al mandante via email (scope irec.write)
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Esito dell'invio
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [inviato, destinatario_presente]
+                properties:
+                  inviato: { type: boolean }
+                  destinatario_presente: { type: boolean }
+        '403': { $ref: '#/components/responses/EntitlementError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
 
   # Gli endpoint operativi vivono alla root, fuori dal prefisso /v1
   # (server override per-path).
@@ -324,6 +584,23 @@ components:
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: >-
+        Stato incompatibile con l'azione. `code`: invoice_not_pausable,
+        invoice_not_paused, invoice_not_active, invoice_already_paid,
+        communication_not_cancellable, communication_not_forceable,
+        channel_unavailable, run_in_progress.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Ok:
+      description: Operazione eseguita
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              ok: { type: boolean }
 
   schemas:
     Error:
@@ -332,6 +609,75 @@ components:
       properties:
         error: { type: string }
         code: { type: string }
+
+    Kpi:
+      type: object
+      required: [affidato, recuperato, da_recuperare, passato_a_recupero]
+      properties:
+        affidato: { type: string, format: decimal }
+        recuperato: { type: string, format: decimal }
+        da_recuperare: { type: string, format: decimal }
+        passato_a_recupero: { type: string, format: decimal }
+        fatture_per_stato: { type: object, additionalProperties: { type: integer } }
+        posizioni_aperte: { type: integer }
+        posizioni_chiuse: { type: integer }
+
+    Position:
+      type: object
+      properties:
+        id: { type: string }
+        cliente: { type: string }
+        piva_cf: { type: string }
+        stato: { type: string }
+        importo_totale_residuo: { type: string, format: decimal }
+        fatture:
+          type: array
+          items: { $ref: '#/components/schemas/Invoice' }
+
+    Comunicazione:
+      type: object
+      properties:
+        id: { type: string }
+        canale: { type: string }
+        template: { type: string }
+        stato:
+          type: string
+          enum: [programmata, inviata, annullata, fallita, saltata]
+        programmata_per: { type: string, format: date-time }
+        inviata_at: { type: [string, 'null'], format: date-time }
+        esito_recapito: { type: [string, 'null'] }
+
+    Storico:
+      type: object
+      properties:
+        fattura_id: { type: string }
+        comunicazioni:
+          type: array
+          items: { $ref: '#/components/schemas/Comunicazione' }
+
+    ProssimiInvii:
+      type: object
+      properties:
+        fattura_id: { type: string }
+        prossimi:
+          type: array
+          items: { $ref: '#/components/schemas/Comunicazione' }
+
+    InvoiceState:
+      type: object
+      required: [id, stato]
+      properties:
+        id: { type: string }
+        stato: { type: string }
+
+    PagamentoManuale:
+      type: object
+      required: [fattura_id, stato, gia_registrato, comunicazioni_annullate]
+      properties:
+        fattura_id: { type: string }
+        stato: { type: string }
+        gia_registrato: { type: boolean }
+        comunicazioni_annullate: { type: integer }
 
     RunAccepted:
       type: object
