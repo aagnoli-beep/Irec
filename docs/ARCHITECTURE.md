@@ -111,16 +111,37 @@ prompt; il limite di pacchetto risponde con upsell garbato, non errore freddo.
 
 ## 6. Modello dati (proprietà di IREC, Postgres dedicato)
 
-Entità dal PRD §2: Mandante, Cliente finale, Posizione, Fattura, Flusso/Step,
-Comunicazione, Pagamento, Report. Stati fattura: **Gestione, Pausa, Saldata,
-Insoluto** (+ etichetta visuale "Scadenza" pre-scadenza, punto aperto A del PRD).
+Entità dal PRD §2 implementate: Mandante, Cliente finale, Posizione, Fattura,
+Flusso/Step, Comunicazione, Pagamento, Audit log. Il *Report* del PRD non è
+un'entità persistita: è generato al momento dai dati esistenti (M6).
+Stati fattura: **Gestione, Pausa, Saldata, Insoluto** (+ etichetta visuale
+"Scadenza" pre-scadenza, punto aperto A del PRD).
 
-- Ogni tabella con `tenant_id` (+ `user_id` dove serve); valutare RLS Postgres.
+**Come è garantito l'isolamento (deciso in M1).** Tre livelli indipendenti,
+così la garanzia non dipende dalla disciplina di chi scrive il codice:
+
+1. **`TenantRepository`** (`irec/adapters/db/repository.py`): unico accesso ai
+   dati, filtra ogni lettura, scrittura e cancellazione per il `tenant_id` del
+   call-token.
+2. **Guard `before_flush`**: rifiuta qualunque riga in uscita verso un tenant
+   diverso, anche se il `tenant_id` è stato alterato dopo l'inserimento o su
+   un'entità già caricata.
+3. **Foreign key composite `(tenant_id, id)`**: il database rende impossibile
+   un arco fra tenant diversi, quindi né una navigazione di relazione né una
+   cancellazione a cascata possono attraversare il confine.
+
+La RLS Postgres del brief §3 resta una possibile quarta rete di sicurezza, da
+valutare quando il servizio avrà connessioni non applicative. `user_id` per
+tabella non è stato introdotto: in MVP ogni mandante ha un solo account
+operativo (PRD Gestione utenze §5).
+
 - Audit trail: ogni comunicazione (data/ora, canale, operatore, esito recapito),
   ogni transizione di stato, ogni azione manuale. Storico immutabile.
-- Idempotenza pagamenti: il pagamento manuale deve riconoscere lo stesso
-  pagamento rilevato poi dalla riconciliazione (no doppio conteggio).
-- GDPR: endpoint di cancellazione tenant/utente; FK con cascade.
+- Idempotenza pagamenti: `chiave_idempotenza` univoca per tenant, così il
+  pagamento registrato a mano e quello rilevato dalla riconciliazione non
+  vengono contati due volte.
+- Importi `Numeric(14,2)` e quantizzazione al centesimo nel dominio: mai float.
+- GDPR: `DELETE /v1/tenant` (richiede scope dedicato), FK con cascade.
 
 ## 7. Cosa NON fare (lista nera dal brief)
 

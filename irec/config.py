@@ -6,7 +6,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="IREC_", env_file=".env", extra="ignore")
 
-    # dev | production. In production l'assenza di jwks_url blocca lo startup.
+    # dev | production. In production l'assenza di jwks_url o database_url
+    # blocca lo startup.
     environment: str = "dev"
 
     # Auth: JWKS pubblico con cui IREC verifica i call-token firmati da Mind

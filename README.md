@@ -25,11 +25,13 @@ Python 3.12 · FastAPI · Pydantic · SQLAlchemy/Alembic · Postgres · Docker.
 
 | Variabile | Default | Note |
 |---|---|---|
-| `IREC_ENVIRONMENT` | `dev` | Con `production`, l'assenza di `IREC_JWKS_URL` blocca lo startup (fail-fast). |
+| `IREC_ENVIRONMENT` | `dev` | Con `production`, l'assenza di `IREC_JWKS_URL` **o** di `IREC_DATABASE_URL` blocca lo startup (fail-fast): mai un deploy vivo con auth o dati non operativi. |
 | `IREC_JWKS_URL` | — | JWKS pubblico con cui IREC verifica i call-token firmati da Mind. Deve essere `https://` (http solo per localhost). **Se assente**: le rotte protette rispondono `503 auth_not_configured` e `/ready` è 503. |
 | `IREC_TOKEN_AUDIENCE` | `irec` | Valore atteso del claim `aud`. |
 | `IREC_LOG_LEVEL` | `INFO` | Livello di log (output JSON strutturato). |
-| `IREC_DATABASE_URL` | — | Postgres di IREC (usata da M1). |
+| `IREC_DATABASE_URL` | — | Postgres di IREC. **Se assente**: le rotte dati rispondono `503 database_not_configured` e `/ready` è 503. |
+| `IREC_DB_PASSWORD` | `irec_dev_only` | Solo per `docker compose`: password del Postgres locale. |
+| `IREC_TEST_DATABASE_URL` | — | Solo per i test: Postgres su cui rieseguire la suite di persistenza. Se assente, quei test girano solo su SQLite. |
 
 Le variabili possono essere fornite anche via file `.env` (non committato).
 
@@ -40,6 +42,14 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/pytest          # test
 .venv/bin/ruff check .    # lint
 docker compose up         # servizio + Postgres locale
+```
+
+I test di persistenza girano sia su SQLite (veloce) sia su Postgres, se
+`IREC_TEST_DATABASE_URL` è configurata — in CI lo è sempre. Per eseguirli
+anche in locale su Postgres:
+
+```bash
+IREC_TEST_DATABASE_URL=postgresql+psycopg://postgres:test@127.0.0.1:5432/irec_test .venv/bin/pytest
 ```
 
 Migrazioni del database (richiede `IREC_DATABASE_URL`):

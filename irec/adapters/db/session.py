@@ -1,19 +1,30 @@
+import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.orm import Session, sessionmaker
 
-# Connessione verificata prima dell'uso: evita di servire errori su
-# connessioni chiuse dal database dopo un periodo di inattività.
-_ENGINE_OPTIONS = {"pool_pre_ping": True}
+logger = logging.getLogger("irec.db")
+
+_ENGINE_OPTIONS = {
+    # Connessione verificata prima dell'uso: evita di servire errori su
+    # connessioni chiuse dal database dopo un periodo di inattività.
+    "pool_pre_ping": True,
+    # Senza questo, i messaggi d'errore di SQLAlchemy includono lo statement
+    # CON I PARAMETRI: P.IVA, email, importi e tenant finirebbero nei log a
+    # ogni violazione di vincolo (evento atteso sui reimport).
+    "hide_parameters": True,
+}
 
 
 def create_db_engine(database_url: str) -> Engine:
+    """Engine del database di IREC, con i parametri esclusi dagli errori."""
     return create_engine(database_url, **_ENGINE_OPTIONS)
 
 
 def create_session_factory(engine: Engine) -> sessionmaker[Session]:
+    """Factory di sessioni; gli oggetti restano usabili dopo il commit."""
     return sessionmaker(bind=engine, expire_on_commit=False)
 
 
@@ -32,10 +43,12 @@ def session_scope(factory: sessionmaker[Session]) -> Iterator[Session]:
 
 
 def check_connection(engine: Engine) -> bool:
-    """Ping usato da /ready. Non propaga l'errore né la connection string."""
+    """Ping usato da /ready. Non propaga l'errore né la connection string al
+    client, ma lascia traccia del motivo nei log del servizio."""
     try:
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))
-    except Exception:
+    except Exception as exc:
+        logger.warning("ping database fallito: %s", type(exc).__name__)
         return False
     return True

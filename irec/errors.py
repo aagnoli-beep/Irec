@@ -3,8 +3,21 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import SQLAlchemyError
 
 logger = logging.getLogger("irec")
+
+
+def log_eccezione(exc: BaseException) -> None:
+    """Logga un errore non gestito senza far uscire dati del debitore.
+
+    Gli errori SQLAlchemy portano nello stack lo statement e, a seconda
+    della configurazione, i valori: di quelli si registra solo il tipo.
+    """
+    if isinstance(exc, SQLAlchemyError):
+        logger.error("errore database: %s", type(exc).__name__)
+        return
+    logger.exception("unhandled error", exc_info=exc)
 
 
 class AppError(Exception):
@@ -36,7 +49,7 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(Exception)
     async def unhandled_error_handler(request: Request, exc: Exception) -> JSONResponse:
-        logger.exception("unhandled error", exc_info=exc)
+        log_eccezione(exc)
         return JSONResponse(
             status_code=500,
             content={"error": "internal server error", "code": "internal"},

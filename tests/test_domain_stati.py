@@ -40,6 +40,23 @@ class TestStatoDopoPagamento:
             == StatoFattura.PAUSA
         )
 
+    @pytest.mark.parametrize("stato", [StatoFattura.PAUSA, StatoFattura.INSOLUTO])
+    def test_chi_salda_esce_dal_flusso_da_qualunque_stato(self, stato):
+        """Promessa onorata e insoluto recuperato finiscono entrambi in Saldata."""
+        assert stato_dopo_pagamento(stato, Decimal("0.00")) == StatoFattura.SALDATA
+
+    def test_residuo_sub_centesimo_e_saldo_non_pagamento_parziale(self):
+        """Il DB arrotonda a 2 decimali: un residuo di 0.001 legge 0.00.
+
+        Se il dominio lo considerasse ancora dovuto, la fattura resterebbe
+        in Gestione e il cliente che ha pagato continuerebbe a ricevere
+        solleciti mentre a schermo risulta saldata.
+        """
+        assert (
+            stato_dopo_pagamento(StatoFattura.GESTIONE, Decimal("0.001"))
+            == StatoFattura.SALDATA
+        )
+
     @pytest.mark.parametrize("stato", [StatoFattura.SALDATA, StatoFattura.INSOLUTO])
     def test_stato_terminale_con_residuo_positivo_e_incoerente(self, stato):
         with pytest.raises(TransizioneNonValida):
@@ -74,6 +91,10 @@ class TestStatoPosizione:
         stati = [StatoFattura.SALDATA, StatoFattura.INSOLUTO]
         assert stato_posizione(stati) == StatoPosizione.CHIUSA
 
+    def test_una_promessa_di_pagamento_non_chiude_la_posizione(self):
+        stati = [StatoFattura.SALDATA, StatoFattura.PAUSA]
+        assert stato_posizione(stati) == StatoPosizione.APERTA
+
 
 class TestResiduo:
     def test_incasso_parziale(self):
@@ -94,6 +115,34 @@ class TestResiduo:
     def test_precisione_decimale_sui_centesimi(self):
         """Mai float: 0.1 + 0.2 non deve introdurre errori di arrotondamento."""
         assert residuo_dopo_incasso(Decimal("0.30"), Decimal("0.10")) == Decimal("0.20")
+
+    def test_incasso_zero_e_un_no_op(self):
+        assert residuo_dopo_incasso(Decimal("1000.00"), Decimal("0.00")) == Decimal(
+            "1000.00"
+        )
+
+    def test_incasso_negativo_e_rifiutato(self):
+        """Uno storno non deve aumentare il residuo per effetto collaterale."""
+        with pytest.raises(ValueError, match="negativo"):
+            residuo_dopo_incasso(Decimal("100.00"), Decimal("-50.00"))
+
+    @pytest.mark.parametrize(
+        ("residuo", "incasso", "atteso"),
+        [
+            (Decimal("1000.00"), Decimal("999.999"), Decimal("0.00")),
+            (Decimal("100.00"), Decimal("99.994"), Decimal("0.01")),
+            # Mezzo centesimo esatto: HALF_UP dà 0.01, HALF_EVEN darebbe 0.00.
+            # È il caso che distingue le due regole, e va pinnato.
+            (Decimal("100.00"), Decimal("99.995"), Decimal("0.01")),
+            (Decimal("0.01"), Decimal("0.005"), Decimal("0.01")),
+        ],
+    )
+    def test_il_residuo_e_sempre_quantizzato_al_centesimo(self, residuo, incasso, atteso):
+        """Arrotondamento commerciale (HALF_UP), dichiarato e pinnato: su
+        migliaia di fatture la scelta della regola si vede a bilancio."""
+        risultato = residuo_dopo_incasso(residuo, incasso)
+        assert risultato == atteso
+        assert risultato.as_tuple().exponent == -2
 
 
 class TestCanaliPerPacchetto:

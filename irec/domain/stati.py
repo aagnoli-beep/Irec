@@ -3,9 +3,21 @@
 Funzioni senza IO: decidono lo stato risultante, non lo persistono.
 """
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from irec.domain.enums import StatoFattura, StatoPosizione
+
+# Gli importi vivono al centesimo, come le colonne Numeric(14, 2): ogni
+# risultato è quantizzato qui, altrimenti il dominio e il dato persistito
+# divergono (residuo 0.001 in memoria = 0.00 a database = fattura saldata
+# che continua a ricevere solleciti).
+CENTESIMO = Decimal("0.01")
+ARROTONDAMENTO = ROUND_HALF_UP
+
+
+def quantizza(importo: Decimal) -> Decimal:
+    """Porta l'importo a 2 decimali con arrotondamento commerciale."""
+    return importo.quantize(CENTESIMO, rounding=ARROTONDAMENTO)
 
 # Stati da cui la fattura è uscita dal flusso di sollecito: non tornano indietro
 # per effetto di un pagamento parziale o di un ricalcolo.
@@ -29,18 +41,23 @@ def stato_dopo_pagamento(
 ) -> StatoFattura:
     """Stato della fattura dopo l'aggiornamento del residuo.
 
-    Residuo azzerato (o negativo, in caso di sovra-pagamento) → Saldata.
+    Residuo azzerato (o negativo, in caso di sovra-pagamento) → Saldata,
+    anche da Pausa o Insoluto: chi paga esce sempre dal flusso.
     Pagamento parziale → la fattura resta dov'è: il flusso prosegue con
     l'importo aggiornato, salvo pausa manuale (PRD 5.2).
+
+    Il residuo è valutato al centesimo: una differenza sub-centesimo è
+    saldo, non pagamento parziale.
 
     Solleva TransizioneNonValida se la fattura è già in uno stato terminale
     con residuo positivo (dato incoerente da segnalare, non da correggere).
     """
-    if importo_residuo <= 0:
+    residuo = quantizza(importo_residuo)
+    if residuo <= 0:
         return StatoFattura.SALDATA
     if stato_corrente in STATI_TERMINALI:
         raise TransizioneNonValida(
-            f"fattura in stato {stato_corrente} con residuo {importo_residuo}"
+            f"fattura in stato {stato_corrente} con residuo {residuo}"
         )
     return stato_corrente
 
@@ -64,7 +81,14 @@ def stato_posizione(stati_fatture: list[StatoFattura]) -> StatoPosizione:
 
 
 def residuo_dopo_incasso(importo_residuo: Decimal, importo_incassato: Decimal) -> Decimal:
-    """Nuovo residuo, mai negativo: l'eccedenza di un sovra-pagamento non
-    diventa un credito verso il debitore in questo modulo."""
-    nuovo = importo_residuo - importo_incassato
+    """Nuovo residuo quantizzato al centesimo, mai negativo.
+
+    L'eccedenza di un sovra-pagamento non diventa un credito verso il
+    debitore in questo modulo. Un incasso negativo (storno di un incasso
+    errato) è rifiutato: gli storni devono passare da una via esplicita,
+    non aumentare il residuo per effetto collaterale.
+    """
+    if importo_incassato < 0:
+        raise ValueError("importo incassato negativo: usare una rettifica esplicita")
+    nuovo = quantizza(importo_residuo - importo_incassato)
     return nuovo if nuovo > 0 else Decimal("0.00")

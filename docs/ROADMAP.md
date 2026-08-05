@@ -127,8 +127,13 @@ A fine di ogni milestone si lanciano i reviewer di `.claude/agents/` (security,
 architecture, code-quality, test, docs → tech-lead-synthesizer) sul lavoro
 svolto. Il report e il sub-piano di remediation R<n> vanno in `docs/reviews/`;
 gli item bloccanti si risolvono subito, gli altri confluiscono nella milestone
-successiva. Backlog corrente: R1 in [reviews/2026-08-05-M0.md](reviews/2026-08-05-M0.md)
-(da eseguire dentro M1).
+successiva.
+
+| Milestone | Stato | Review |
+|---|---|---|
+| M0 — Fondazioni | ✅ | [2026-08-05-M0.md](reviews/2026-08-05-M0.md) — R0 e R1 eseguiti |
+| M1 — Modello dati | ✅ | [2026-08-05-M1.md](reviews/2026-08-05-M1.md) — R2 eseguito |
+| M2 — Adapter mock | ▶️ prossima | — |
 
 ## Fase 2 (fuori perimetro MVP)
 

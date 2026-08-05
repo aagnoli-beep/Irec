@@ -90,9 +90,13 @@ paths:
         - $ref: '#/components/parameters/CorrelationId'
         - name: status
           in: query
+          description: >-
+            Stato operativo della fattura. `scaduta` non è uno stato
+            persistito ma un filtro derivato (data_scadenza passata e
+            fattura non ancora saldata).
           schema:
             type: string
-            enum: [gestione, pausa, saldata, insoluto, overdue]
+            enum: [gestione, pausa, saldata, insoluto, scaduta]
         - name: as_of
           in: query
           schema: { type: string, format: date }
@@ -131,6 +135,7 @@ paths:
       description: >-
         Cancella tutti i dati del tenant identificato dal call-token.
         Non è possibile cancellare i dati di un altro tenant.
+        Richiede lo scope `irec.tenant.delete` nel token firmato da Mind.
       parameters:
         - $ref: '#/components/parameters/CorrelationId'
       responses:
@@ -150,6 +155,7 @@ paths:
                 righe_cancellate: { fattura: 12, comunicazione: 34 }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/EntitlementError' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
 
   /usage:
     get:
@@ -195,7 +201,7 @@ paths:
       - url: /
     get:
       operationId: ready
-      summary: Readiness (verifier configurato; da M1 anche Postgres)
+      summary: Readiness (verifier dei call-token e database)
       security: []
       responses:
         '200':
@@ -251,12 +257,14 @@ components:
     ServiceUnavailable:
       description: >-
         Dipendenza non disponibile. `code`: auth_not_configured,
-        jwks_unavailable, database_not_configured.
+        jwks_unavailable, database_not_configured, database_unreachable.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
     EntitlementError:
-      description: Entitlement assente o insufficiente
+      description: >-
+        Autorizzazione insufficiente. `code`: entitlement_missing (nessun
+        entitlement IREC), scope_missing (scope richiesto assente dal token).
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -314,8 +322,10 @@ components:
         piva_cf: { type: string }
         data_emissione: { type: string, format: date }
         data_scadenza: { type: string, format: date }
-        importo: { type: number }
-        importo_residuo: { type: number }
+        # Gli importi viaggiano come stringhe decimali: il dominio è
+        # finanziario e un double introdurrebbe errori sui centesimi.
+        importo: { type: string, format: decimal, examples: ['1220.00'] }
+        importo_residuo: { type: string, format: decimal, examples: ['0.00'] }
         stato:
           type: string
           enum: [gestione, pausa, saldata, insoluto]

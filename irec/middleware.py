@@ -6,6 +6,7 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 
+from irec.errors import log_eccezione
 from irec.logging_setup import correlation_id_var
 
 CORRELATION_HEADER = "x-correlation-id"
@@ -33,8 +34,8 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
         token = correlation_id_var.set(correlation_id)
         try:
             response = await call_next(request)
-        except Exception:
-            logger.exception("unhandled error")
+        except Exception as exc:
+            log_eccezione(exc)
             response = JSONResponse(
                 status_code=500,
                 content={"error": "internal server error", "code": "internal"},

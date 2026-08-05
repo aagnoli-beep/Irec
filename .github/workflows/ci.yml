@@ -8,6 +8,27 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+
+    services:
+      # I test di schema girano anche sul database di produzione: SQLite
+      # non applica le larghezze delle colonne e tratta diversamente
+      # alcuni vincoli, quindi da solo darebbe una fiducia eccessiva.
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: irec_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      IREC_TEST_DATABASE_URL: postgresql+psycopg://postgres:test@localhost:5432/irec_test
+
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -24,9 +45,9 @@ jobs:
         run: ruff check .
       - name: Test
         run: pytest -q
-      - name: Parse openapi.yaml
-        # M5: sostituire con la verifica contratto <-> implementazione.
-        run: python -c "import yaml; yaml.safe_load(open('openapi.yaml'))"
+      - name: Valida openapi.yaml
+        # M5: aggiungere la verifica contratto <-> implementazione.
+        run: openapi-spec-validator openapi.yaml
       - name: Audit dipendenze
         # --skip-editable: il pacchetto locale non è su PyPI e non è auditabile.
         # Esce comunque con errore se una dipendenza ha una CVE nota.

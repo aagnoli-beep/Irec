@@ -1,4 +1,5 @@
 import base64
+import os
 import time
 import uuid
 from typing import Annotated
@@ -8,8 +9,9 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import Depends
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
-from sqlalchemy.pool import StaticPool
+from sqlalchemy import create_engine, event
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.pool import NullPool, StaticPool
 
 from irec.adapters.db.models import Base
 from irec.adapters.db.repository import TenantRepository
@@ -59,7 +61,7 @@ def make_token(rsa_key):
             "sub": "user-123",
             "tenant_id": "tenant-abc",
             "entitlement": "irec:pro",
-            "scope": "irec.read irec.write",
+            "scope": "irec.read irec.write irec.tenant.delete",
             "aud": "irec",
             "jti": uuid.uuid4().hex,
             "exp": int(time.time()) + 120,
@@ -71,20 +73,52 @@ def make_token(rsa_key):
     return _make
 
 
-@pytest.fixture
-def db_engine():
-    """Database di test reale (SQLite in memoria), non un mock della sessione."""
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-    with engine.connect() as connection:
-        # SQLite ignora le FK se non abilitate: senza questo il test della
-        # cancellazione a cascata non proverebbe nulla.
-        connection.execute(text("PRAGMA foreign_keys=ON"))
+def _abilita_foreign_key_sqlite(engine) -> None:
+    """SQLite ignora le FK se non abilitate, e va fatto su OGNI connessione.
+
+    Con un listener invece che una volta sola: altrimenti il giorno che si
+    cambia il pool i test sulle FK smettono di provare qualcosa senza fallire.
+    """
+
+    @event.listens_for(engine, "connect")
+    def _pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+
+@pytest.fixture(params=["sqlite", "postgres"])
+def db_engine(request):
+    """Database di test reale, non un mock della sessione.
+
+    Ogni test gira su entrambi i motori: SQLite per la velocità, Postgres
+    (quello di produzione) perché SQLite non applica le larghezze delle
+    colonne e tratta diversamente alcuni vincoli. Se Postgres non è
+    disponibile in locale il parametro viene saltato, ma in CI c'è sempre.
+    """
+    if request.param == "sqlite":
+        engine = create_engine(
+            "sqlite://",
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
+        _abilita_foreign_key_sqlite(engine)
+    else:
+        url = os.environ.get("IREC_TEST_DATABASE_URL")
+        if not url:
+            pytest.skip("IREC_TEST_DATABASE_URL non configurata")
+        engine = create_engine(url, poolclass=NullPool)
+        try:
+            with engine.connect():
+                pass
+        except OperationalError:
+            engine.dispose()
+            pytest.skip("Postgres di test non raggiungibile")
+        Base.metadata.drop_all(engine)
+
     Base.metadata.create_all(engine)
     yield engine
+    Base.metadata.drop_all(engine)
     engine.dispose()
 
 
