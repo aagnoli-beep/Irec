@@ -9,10 +9,16 @@ fail-fast allo startup, mai dati finti spacciati per veri.
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from irec.adapters.mock.canali import MockCanaleInvio
 from irec.adapters.mock.providers import MockBanca, MockCassettoFiscale, MockRiconciliatore
 from irec.adapters.mock.runtime import DemoScenari
 from irec.config import Settings
-from irec.domain.porte import FattureProvider, MovimentiProvider, Riconciliatore
+from irec.domain.porte import (
+    CanaleInvio,
+    FattureProvider,
+    MovimentiProvider,
+    Riconciliatore,
+)
 
 
 @dataclass(frozen=True)
@@ -20,6 +26,7 @@ class ProviderSet:
     fatture: FattureProvider
     movimenti: MovimentiProvider
     riconciliatore: Riconciliatore
+    canale_invio: CanaleInvio
 
 
 def build_providers(settings: Settings) -> ProviderSet:
@@ -35,6 +42,7 @@ def build_providers(settings: Settings) -> ProviderSet:
             fatture=MockCassettoFiscale(scenari, oggi=oggi),
             movimenti=MockBanca(scenari, oggi=oggi),
             riconciliatore=MockRiconciliatore(),
+            canale_invio=MockCanaleInvio(),
         )
     # L'unico altro valore ammesso dal Literal della config è "reali".
     raise NotImplementedError(

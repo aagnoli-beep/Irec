@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     # In production i mock bloccano lo startup.
     providers: Literal["mock", "reali"] = "mock"
 
+    # Destinatario della mail di escalation a T+45 (PRD 4.9, "mail a IREC").
+    escalation_email_recupero: str = "recupero.crediti@irec.example"
+
 
 @lru_cache
 def get_settings() -> Settings:

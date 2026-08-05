@@ -148,6 +148,37 @@ class MovimentiProvider(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class MessaggioUscita:
+    """Messaggio consolidato verso il debitore (o verso Irec/mandante per
+    l'escalation), pronto per il canale di invio."""
+
+    canale: str  # valore di Canale
+    destinatario: str  # email / PEC / numero, a seconda del canale
+    template: str
+    denominazione_destinatario: str
+    numeri_fattura: tuple[str, ...]
+    importo_totale_residuo: str  # stringa decimale
+
+
+@dataclass(frozen=True)
+class EsitoInvio:
+    consegnato: bool
+    dettaglio: str | None = None
+
+
+@runtime_checkable
+class CanaleInvio(Protocol):
+    """Servizio di recapito (email/PEC/WhatsApp/voice).
+
+    La titolarità reale dei canali è un punto aperto (docs/ARCHITECTURE
+    §8): mock in M4, adapter reali in M8. Un fallimento di recapito è un
+    `EsitoInvio(consegnato=False)`, non un'eccezione.
+    """
+
+    def invia(self, tenant_id: str, messaggio: MessaggioUscita) -> EsitoInvio: ...
+
+
 @runtime_checkable
 class Riconciliatore(Protocol):
     """Microservizio di riconciliazione incassi↔fatture."""

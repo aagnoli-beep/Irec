@@ -12,9 +12,11 @@ from irec.adapters.db.models import SyncRun
 from irec.adapters.db.repository import TenantRepository
 from irec.adapters.db.session import SessionFactory, session_scope
 from irec.adapters.providers import ProviderSet
+from irec.config import get_settings
 from irec.domain.enums import StatoRun
 from irec.errors import log_eccezione
 from irec.logging_setup import correlation_id_var, tenant_id_var
+from irec.services.invii import MotoreInvii
 from irec.services.sync import CicloSincronizzazione
 
 logger = logging.getLogger("irec.sync")
@@ -40,11 +42,17 @@ def esegui_run(
     token_correlation = correlation_id_var.set(correlation_id)
     token_tenant = tenant_id_var.set(tenant_id)
 
+    adesso = datetime.now(UTC)
     ciclo = CicloSincronizzazione(
         providers.fatture,
         providers.movimenti,
         providers.riconciliatore,
-        oggi=datetime.now(UTC).date(),
+        oggi=adesso.date(),
+        motore_invii=lambda: MotoreInvii(
+            providers.canale_invio,
+            adesso=adesso,
+            email_recupero_crediti=get_settings().escalation_email_recupero,
+        ),
     )
     try:
         with session_scope(session_factory) as session:

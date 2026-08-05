@@ -1,15 +1,18 @@
-"""Ciclo giornaliero di sincronizzazione (ROADMAP M3, fasi 1-4 del flusso).
+"""Ciclo giornaliero di sincronizzazione (ROADMAP M3-M4).
 
 Per un tenant: verifica collegamenti → recupero fatture e movimenti →
-riconciliazione → applicazione degli esiti al modello dati. Rieseguibile
-in sicurezza: fatture già importate e pagamenti già registrati vengono
-riconosciuti e saltati (idempotenza).
+riconciliazione → applicazione degli esiti → motore invii (M4: pause,
+escalation, solleciti consolidati). Rieseguibile in sicurezza: fatture
+già importate e pagamenti già registrati vengono riconosciuti e saltati.
 
-Il calcolo dello schedule usa il flusso di default (M4 introdurrà regole
-di calendario, canali per pacchetto e consolidamento).
+Lo schedule dei solleciti è calcolato dal flusso di default con le regole
+di calendario di `irec.domain.scheduler`; l'invio effettivo è delegato al
+`MotoreInvii`, iniettato come factory (opzionale: senza, il ciclo si
+ferma dopo la riconciliazione, come in M3).
 """
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from decimal import Decimal
@@ -53,6 +56,11 @@ from irec.domain.stati import (
     stato_dopo_pagamento,
     stato_posizione,
 )
+from irec.services.invii import MotoreInvii
+
+# Factory, non istanza: il motore va costruito al momento della run
+# (l'"adesso" è suo), non alla costruzione del ciclo.
+MotoreInviiFactory = Callable[[], MotoreInvii]
 
 logger = logging.getLogger("irec.sync")
 
@@ -77,6 +85,15 @@ class EsitoSincronizzazione:
     comunicazioni_annullate: int = 0
     posizioni_chiuse: int = 0
     anomalie: list[str] = field(default_factory=list)
+    # Fase invii (M4): valorizzata quando il ciclo esegue anche il motore.
+    pause_riprese: int = 0
+    escalation_eseguite: int = 0
+    escalation_imminenti: int = 0
+    messaggi_inviati: int = 0
+    comunicazioni_inviate: int = 0
+    comunicazioni_saltate: int = 0
+    comunicazioni_fallite: int = 0
+    segnalazioni: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -92,6 +109,14 @@ class EsitoSincronizzazione:
             "comunicazioni_annullate": self.comunicazioni_annullate,
             "posizioni_chiuse": self.posizioni_chiuse,
             "anomalie": list(self.anomalie),
+            "pause_riprese": self.pause_riprese,
+            "escalation_eseguite": self.escalation_eseguite,
+            "escalation_imminenti": self.escalation_imminenti,
+            "messaggi_inviati": self.messaggi_inviati,
+            "comunicazioni_inviate": self.comunicazioni_inviate,
+            "comunicazioni_saltate": self.comunicazioni_saltate,
+            "comunicazioni_fallite": self.comunicazioni_fallite,
+            "segnalazioni": list(self.segnalazioni),
         }
 
 
@@ -105,12 +130,14 @@ class CicloSincronizzazione:
         riconciliatore: Riconciliatore,
         oggi: date,
         lookback_giorni: int = LOOKBACK_GIORNI_DEFAULT,
+        motore_invii: "MotoreInviiFactory | None" = None,
     ):
         self._fatture_provider = fatture_provider
         self._movimenti_provider = movimenti_provider
         self._riconciliatore = riconciliatore
         self._oggi = oggi
         self._lookback = timedelta(days=lookback_giorni)
+        self._motore_invii = motore_invii
 
     def esegui(self, repo: TenantRepository) -> EsitoSincronizzazione:
         esito = EsitoSincronizzazione()
@@ -123,6 +150,7 @@ class CicloSincronizzazione:
         self._importa_fatture(repo, mandante, esito)
         self._riconcilia(repo, esito)
         self._aggiorna_posizioni(repo, esito)
+        self._esegui_invii(repo, esito)
 
         repo.log_event(
             TipoEvento.SINCRONIZZAZIONE,
@@ -136,6 +164,24 @@ class CicloSincronizzazione:
             ),
         )
         return esito
+
+    def _esegui_invii(self, repo: TenantRepository, esito: EsitoSincronizzazione) -> None:
+        """Fase invii (M4): pause, escalation, solleciti consolidati.
+
+        Eseguita DOPO la riconciliazione, così chi ha pagato in questo
+        stesso giro non riceve nulla (oltre al controllo just-in-time).
+        """
+        if self._motore_invii is None:
+            return
+        esito_invii = self._motore_invii().esegui(repo)
+        esito.pause_riprese = esito_invii.pause_riprese
+        esito.escalation_eseguite = esito_invii.escalation_eseguite
+        esito.escalation_imminenti = esito_invii.escalation_imminenti
+        esito.messaggi_inviati = esito_invii.messaggi_inviati
+        esito.comunicazioni_inviate = esito_invii.comunicazioni_inviate
+        esito.comunicazioni_saltate = esito_invii.comunicazioni_saltate
+        esito.comunicazioni_fallite = esito_invii.comunicazioni_fallite
+        esito.segnalazioni = esito_invii.segnalazioni
 
     # --- fase 1-2: collegamenti e recupero fatture ---
 

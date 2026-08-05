@@ -117,6 +117,14 @@ paths:
                   comunicazioni_annullate: 18
                   posizioni_chiuse: 1
                   anomalie: ["fattura_gia_scaduta:32-FA"]
+                  pause_riprese: 0
+                  escalation_eseguite: 0
+                  escalation_imminenti: 1
+                  messaggi_inviati: 2
+                  comunicazioni_inviate: 3
+                  comunicazioni_saltate: 0
+                  comunicazioni_fallite: 0
+                  segnalazioni: []
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/EntitlementError' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -373,6 +381,16 @@ components:
             comunicazioni_annullate: { type: integer }
             posizioni_chiuse: { type: integer }
             anomalie:
+              type: array
+              items: { type: string }
+            pause_riprese: { type: integer }
+            escalation_eseguite: { type: integer }
+            escalation_imminenti: { type: integer }
+            messaggi_inviati: { type: integer }
+            comunicazioni_inviate: { type: integer }
+            comunicazioni_saltate: { type: integer }
+            comunicazioni_fallite: { type: integer }
+            segnalazioni:
               type: array
               items: { type: string }
 

@@ -141,7 +141,8 @@ successiva.
 | M1 — Modello dati | ✅ | [2026-08-05-M1.md](reviews/2026-08-05-M1.md) — R2 eseguito |
 | M2 — Adapter mock | ✅ | [2026-08-05-M2.md](reviews/2026-08-05-M2.md) — R4 eseguito |
 | M3 — Ciclo giornaliero | ✅ | [2026-08-05-M3.md](reviews/2026-08-05-M3.md) — R6 eseguito |
-| M4 — Motore solleciti | ▶️ prossima | — |
+| M4 — Motore solleciti | ✅ | [2026-08-05-M4.md](reviews/2026-08-05-M4.md) |
+| M5 — API `/v1` per Mind | ▶️ prossima | — |
 
 ## Fase 2 (fuori perimetro MVP)
 

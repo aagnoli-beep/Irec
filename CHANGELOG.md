@@ -38,6 +38,17 @@ modo additivo.
 
 ### Servizio
 
+- **M4** — motore solleciti (`irec/services/invii.py`, regole pure in
+  `irec/domain/scheduler.py` e `calendario.py`): calendario italiano
+  (festivi nazionali + Pasquetta, finestra ≤18:00 ora italiana, invii
+  spostati al primo giorno utile), consolidamento per cliente/canale (un
+  messaggio elenca le fatture dovute), canali per pacchetto con salto
+  segnalato (`stato saltata`, migrazione `b7c3d9e1f402`), controllo
+  just-in-time, escalation T+45 (mail a Recupero Crediti + mandante,
+  fattura → Insoluto) con preavviso T+44, ripresa delle pause su promessa
+  scaduta, ricalcolo schedule su modifica scadenza. Invio effettivo dietro
+  la porta `CanaleInvio` (mock in M4, reale in M8). L'esito della run
+  espone i conteggi della fase invii.
 - **M3** — ciclo giornaliero di sincronizzazione (`irec/services/sync.py`):
   verifica collegamenti → import fatture (clienti/posizioni/schedule dal
   flusso di default, reimport idempotente, anomalia su fatture già scadute)

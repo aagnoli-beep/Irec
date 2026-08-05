@@ -8,6 +8,7 @@ from irec.adapters.db.models import SyncRun
 from irec.adapters.db.repository import TenantRepository
 from irec.adapters.db.session import session_scope
 from irec.adapters.mock import MockBanca, MockCassettoFiscale, MockRiconciliatore
+from irec.adapters.mock.canali import MockCanaleInvio
 from irec.adapters.mock.demo import scenario_demo
 from irec.adapters.providers import ProviderSet
 from irec.domain.enums import StatoRun
@@ -24,6 +25,7 @@ def app_con_providers(app, session_factory):
         fatture=MockCassettoFiscale(scenari, oggi=OGGI),
         movimenti=MockBanca(scenari, oggi=OGGI),
         riconciliatore=MockRiconciliatore(),
+        canale_invio=MockCanaleInvio(),
     )
     with session_scope(session_factory) as session:
         TenantRepository(session, TENANT).add(make_mandante())
@@ -186,6 +188,7 @@ class TestEsitoRun:
             fatture=ProviderRotto(),
             movimenti=app_con_providers.state.providers.movimenti,
             riconciliatore=app_con_providers.state.providers.riconciliatore,
+            canale_invio=app_con_providers.state.providers.canale_invio,
         )
         run_id = _avvia(client, make_token, chiave="run-rotta").json()["run_id"]
 

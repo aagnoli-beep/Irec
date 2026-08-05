@@ -44,10 +44,14 @@ class StatoPosizione(StrEnum):
 
 
 class StatoComunicazione(StrEnum):
+    """Stati di una comunicazione (PRD 4.6): saltata = canale non
+    utilizzabile (pacchetto/recapito/opt-out), il flusso prosegue."""
+
     PROGRAMMATA = "programmata"
     INVIATA = "inviata"
     ANNULLATA = "annullata"
     FALLITA = "fallita"
+    SALTATA = "saltata"
 
 
 class OriginePagamento(StrEnum):

@@ -72,12 +72,17 @@ microservizi esterni che orchestra. IREC possiede l'automazione a valle
    - pagamento parziale → resta in **Gestione**, residuo aggiornato;
    - nuova fattura → crea/aggiorna la **Posizione**, genera lo schedule;
    - tutte le fatture saldate → posizione chiusa.
-5. **Motore solleciti** — per fattura attiva, step ancorati a T
-   (T−2 promemoria, T+3, T+6, T+9, T+15, T+18, T+25, T+30, T+35 → T+45)
-   secondo flusso del mandante e pacchetto (Entry: email/PEC; Value:
-   +WhatsApp; Premium: +voice). Regole: nessun invio nei festivi, finestra
-   ≤18:00, consolidamento per cliente/giorno/canale, controllo just-in-time
-   pre-invio, anti-doppio invio.
+5. **Motore solleciti** (M4, `irec/services/invii.py` + regole pure in
+   `irec/domain/scheduler.py` e `calendario.py`) — per fattura attiva, step
+   ancorati a T (T−2 … T+35 → T+45) secondo flusso del mandante e pacchetto
+   (Entry: email/PEC; Value: +WhatsApp; Premium: +voice). Regole: nessun
+   invio nei festivi (nazionali italiani + Pasquetta) né dopo le 18:00 ora
+   italiana (finestra spostata al primo giorno utile), consolidamento per
+   cliente/canale (un messaggio elenca tutte le fatture dovute), controllo
+   just-in-time pre-invio, canali non nel pacchetto o senza recapito
+   saltati e segnalati (il flusso prosegue), invio effettivo dietro la porta
+   `CanaleInvio` (mock in M4, adapter reali in M8). Escalation a T+45: mail a
+   Recupero Crediti + mandante, fattura → Insoluto, con preavviso a T+44.
 6. **Eventi che alterano il flusso** — promessa di pagamento → Pausa con
    nuova data e ripresa automatica; contestazione → Pausa + escalation;
    modifica scadenza → ricalcolo step futuri; opt-out → canale disabilitato.

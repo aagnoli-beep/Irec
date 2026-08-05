@@ -9,9 +9,10 @@ Nessun IO: solo dati e calcolo puro delle date pianificate.
 """
 
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import date, datetime
 
 from irec.domain.enums import Canale
+from irec.domain.scheduler import istante_step
 
 
 @dataclass(frozen=True)
@@ -36,18 +37,13 @@ FLUSSO_DEFAULT: tuple[StepDefault, ...] = (
     StepDefault(9, 35, Canale.PEC, "sollecito_8"),
 )
 
-# A T+45 la pratica esce dal perimetro: mail a Recupero Crediti e al
-# mandante, fattura → Insoluto (PRD 4.9). Gestita in M4.
-ESCALATION_OFFSET_GIORNI = 45
-
-# Ora di invio pianificata. M4 introdurrà le regole di calendario vere:
-# niente festivi, finestra <= 18:00, consolidamento per cliente/giorno.
-ORA_INVIO_DEFAULT = time(10, 0, tzinfo=UTC)
-
 NOME_FLUSSO_DEFAULT = "Flusso standard IREC"
 
 
 def data_invio_pianificata(scadenza: date, offset_giorni: int) -> datetime:
-    """Data/ora pianificata di uno step per una fattura con scadenza T."""
-    giorno = scadenza + timedelta(days=offset_giorni)
-    return datetime.combine(giorno, ORA_INVIO_DEFAULT)
+    """Data/ora pianificata di uno step per una fattura con scadenza T.
+
+    Applica già le regole di calendario (festivi, weekend, finestra
+    oraria): delega a `irec.domain.scheduler.istante_step`.
+    """
+    return istante_step(scadenza, offset_giorni)
