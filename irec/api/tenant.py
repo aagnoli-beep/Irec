@@ -24,7 +24,7 @@ class CancellazioneTenant(BaseModel):
 
 
 @router.delete("/tenant", response_model=CancellazioneTenant)
-def cancella_tenant(
+def delete_tenant_data(
     repo: RepositoryDep,
     ctx: Annotated[CallContext, Depends(get_call_context)],
 ) -> CancellazioneTenant:
@@ -51,6 +51,6 @@ def cancella_tenant(
         "cancellazione GDPR del tenant",
         extra={"sub": ctx.sub, "jti": ctx.jti, "tenant": truncate_tenant(ctx.tenant_id)},
     )
-    conteggi = repo.cancella_tenant()
+    conteggi = repo.delete_tenant_data()
     logger.warning("cancellazione GDPR completata", extra={"righe": conteggi})
     return CancellazioneTenant(tenant_cancellato=True, righe_cancellate=conteggi)

@@ -24,6 +24,16 @@ modo additivo.
 
 ### Servizio
 
+- **M2** — porte dei tre microservizi esterni (`irec/domain/porte.py`) e
+  adapter mock pilotabili per scenario (`irec/adapters/mock/`): collegamenti
+  non attivi, latenza SDI, pagamenti parziali, bonifici cumulativi FIFO,
+  movimenti duplicati. RLS Postgres su tutte le tabelle come quarta rete
+  dell'isolamento tenant (migrazione `a4b1c9d2e7f0`, fail-closed, verificata
+  con un ruolo non privilegiato). Lint di layering (SQLAlchemy vietato fuori
+  da `adapters/db/`), `mypy --strict` e soglia di coverage in CI. Naming:
+  dominio in italiano, infrastruttura in inglese (`delete_tenant_data`,
+  `log_event`).
+
 - **M1** — modello dati Postgres (mandante, cliente finale, posizione,
   fattura, flusso/step, comunicazione, pagamento, audit log), migrazioni
   Alembic, repository con isolamento per tenant, `/ready` che verifica il

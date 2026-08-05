@@ -1,8 +1,12 @@
 import time
+from typing import Any, cast
 from urllib.parse import urlparse
 
 import httpx
 import jwt
+
+Jwks = dict[str, Any]
+Claims = dict[str, Any]
 
 # Solo firma asimmetrica: IREC verifica a chiave pubblica e non deve mai
 # detenere un segreto capace di forgiare token (niente HS*).
@@ -39,7 +43,7 @@ class CallTokenVerifier:
     def __init__(
         self,
         jwks_url: str | None = None,
-        static_jwks: dict | None = None,
+        static_jwks: Jwks | None = None,
         audience: str = "irec",
     ):
         if jwks_url is None and static_jwks is None:
@@ -51,21 +55,23 @@ class CallTokenVerifier:
         self._jwks_url = jwks_url
         self._static_jwks = static_jwks
         self._audience = audience
-        self._cached_jwks: dict | None = None
+        self._cached_jwks: Jwks | None = None
         self._cached_at: float = 0.0
-        self._ultimo_refresh_forzato: float = 0.0
+        self._last_forced_refresh: float = 0.0
 
-    def _fetch_jwks(self) -> dict:
+    def _fetch_jwks(self) -> Jwks:
+        # Il costruttore garantisce jwks_url quando static_jwks è assente.
+        assert self._jwks_url is not None
         try:
             response = httpx.get(self._jwks_url, timeout=JWKS_FETCH_TIMEOUT_SECONDS)
             response.raise_for_status()
         except httpx.HTTPError as exc:
             raise AuthError("jwks_unavailable", "cannot fetch JWKS") from exc
-        self._cached_jwks = response.json()
+        self._cached_jwks = cast(Jwks, response.json())
         self._cached_at = time.monotonic()
         return self._cached_jwks
 
-    def _jwks(self, force_refresh: bool = False) -> dict:
+    def _jwks(self, force_refresh: bool = False) -> Jwks:
         if self._static_jwks is not None:
             return self._static_jwks
         scaduta = time.monotonic() - self._cached_at > JWKS_CACHE_TTL_SECONDS
@@ -73,10 +79,14 @@ class CallTokenVerifier:
             return self._fetch_jwks()
         return self._cached_jwks
 
-    def _cerca_chiave(self, jwks: dict, kid: str | None):
+    def _find_key(
+        self, jwks: Jwks, kid: str | None
+    ) -> "jwt.algorithms.AllowedPublicKeys | None":
         for key in jwks.get("keys", []):
             if key.get("kid") == kid:
-                return jwt.PyJWK.from_dict(key).key
+                return cast(
+                    "jwt.algorithms.AllowedPublicKeys", jwt.PyJWK.from_dict(key).key
+                )
         return None
 
     def _signing_key(self, token: str) -> "jwt.algorithms.AllowedPublicKeys":
@@ -86,27 +96,27 @@ class CallTokenVerifier:
             raise AuthError("invalid_token", "malformed token") from exc
         kid = header.get("kid")
 
-        key = self._cerca_chiave(self._jwks(), kid)
+        key = self._find_key(self._jwks(), kid)
         if key is not None:
             return key
 
         # Kid sconosciuto con cache ancora valida: può essere una rotazione
         # delle chiavi di Mind. Un solo refresh forzato, rate-limitato, prima
         # di rifiutare — altrimenti si resterebbe in 401 fino a scadenza cache.
-        if self._static_jwks is None and self._puo_rinfrescare():
-            self._ultimo_refresh_forzato = time.monotonic()
-            key = self._cerca_chiave(self._jwks(force_refresh=True), kid)
+        if self._static_jwks is None and self._can_force_refresh():
+            self._last_forced_refresh = time.monotonic()
+            key = self._find_key(self._jwks(force_refresh=True), kid)
             if key is not None:
                 return key
         raise AuthError("unknown_key", "no matching key in JWKS")
 
-    def _puo_rinfrescare(self) -> bool:
+    def _can_force_refresh(self) -> bool:
         return (
-            time.monotonic() - self._ultimo_refresh_forzato
+            time.monotonic() - self._last_forced_refresh
             > JWKS_FORCED_REFRESH_MIN_INTERVAL_SECONDS
         )
 
-    def verify(self, token: str) -> dict:
+    def verify(self, token: str) -> Claims:
         key = self._signing_key(token)
         try:
             claims = jwt.decode(

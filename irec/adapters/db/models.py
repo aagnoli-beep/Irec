@@ -102,6 +102,8 @@ class Base(DeclarativeBase):
 class TenantScoped:
     """Mixin: chiave primaria, tenant e timestamp di creazione."""
 
+    __tablename__: str
+
     id: Mapped[str] = mapped_column(ID, primary_key=True, default=_uuid)
     tenant_id: Mapped[str] = mapped_column(TENANT_ID, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

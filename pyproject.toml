@@ -17,7 +17,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
+    "pytest-cov>=5.0",
     "ruff>=0.6",
+    "mypy>=1.11",
     "pip-audit>=2.7",
     "openapi-spec-validator>=0.7",
 ]
@@ -34,11 +36,33 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
+select = ["E", "F", "I", "UP", "B", "TID"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+# Il layering non è una convenzione: gli accessi al database vivono solo
+# in irec/adapters/db/. Una query fuori da lì salta il filtro tenant.
+"sqlalchemy".msg = "Accesso al database solo in irec/adapters/db/ (layering, brief §6)."
 
 [tool.ruff.lint.per-file-ignores]
 # Migrazioni: codice generato da Alembic, non riformattato a mano.
 "migrations/versions/*.py" = ["E501"]
+# I soli punti autorizzati a toccare SQLAlchemy:
+"irec/adapters/db/*" = ["TID251"]
+"migrations/*" = ["TID251"]
+"tests/*" = ["TID251"]
+# errors.py importa solo SQLAlchemyError per non loggare i parametri.
+"irec/errors.py" = ["TID251"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["irec"]
+strict = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+# Gli hook di evento SQLAlchemy hanno firme non tipizzabili in strict.
+module = "irec.adapters.db.repository"
+disallow_untyped_decorators = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

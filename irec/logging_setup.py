@@ -17,7 +17,7 @@ def truncate_tenant(tenant_id: str | None) -> str | None:
 
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
-        payload: dict = {
+        payload: dict[str, object] = {
             "ts": datetime.now(UTC).isoformat(timespec="milliseconds"),
             "level": record.levelname,
             "logger": record.name,

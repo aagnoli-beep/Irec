@@ -7,12 +7,12 @@ router = APIRouter()
 
 
 @router.get("/health")
-def health() -> dict:
+def health() -> dict[str, str]:
     """Liveness: il processo è vivo. Sempre 200."""
     return {"status": "ok"}
 
 
-def _motivo_non_pronto(state) -> str | None:
+def _motivo_non_pronto(state: object) -> str | None:
     """Prima dipendenza non pronta, o None se il servizio può servire traffico."""
     if getattr(state, "verifier", None) is None:
         return "auth_not_configured"

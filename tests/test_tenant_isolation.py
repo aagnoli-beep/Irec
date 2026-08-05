@@ -141,7 +141,7 @@ class TestCancellazioneGdpr:
         popola_tenant(session_factory, "tenant-b")
 
         with session_scope(session_factory) as session:
-            TenantRepository(session, "tenant-a").cancella_tenant()
+            TenantRepository(session, "tenant-a").delete_tenant_data()
 
         with session_scope(session_factory) as session:
             assert TenantRepository(session, "tenant-a").list(model) == []
@@ -151,21 +151,21 @@ class TestCancellazioneGdpr:
         popola_tenant(session_factory, "tenant-a")
 
         with session_scope(session_factory) as session:
-            conteggi = TenantRepository(session, "tenant-a").cancella_tenant()
+            conteggi = TenantRepository(session, "tenant-a").delete_tenant_data()
 
         assert set(conteggi) == {model.__tablename__ for model in TUTTI_I_MODELLI}
         assert all(valore == 1 for valore in conteggi.values()), conteggi
 
     def test_tenant_vuoto_non_e_un_errore(self, session_factory):
         with session_scope(session_factory) as session:
-            conteggi = TenantRepository(session, "tenant-mai-usato").cancella_tenant()
+            conteggi = TenantRepository(session, "tenant-mai-usato").delete_tenant_data()
         assert all(valore == 0 for valore in conteggi.values())
 
     def test_il_tenant_puo_essere_ripopolato_dopo_la_cancellazione(self, session_factory):
         """Nessun residuo che avveleni i vincoli di unicità."""
         popola_tenant(session_factory, "tenant-a")
         with session_scope(session_factory) as session:
-            TenantRepository(session, "tenant-a").cancella_tenant()
+            TenantRepository(session, "tenant-a").delete_tenant_data()
 
         popola_tenant(session_factory, "tenant-a")
         with session_scope(session_factory) as session:

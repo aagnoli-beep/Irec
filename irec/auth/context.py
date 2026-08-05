@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, cast
 
 import anyio.to_thread
 from fastapi import Depends, Request
@@ -31,7 +31,7 @@ def get_verifier(request: Request) -> CallTokenVerifier:
     verifier = getattr(request.app.state, "verifier", None)
     if verifier is None:
         raise AppError(503, "auth_not_configured", "token verifier not configured")
-    return verifier
+    return cast(CallTokenVerifier, verifier)
 
 
 async def get_call_context(

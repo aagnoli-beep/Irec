@@ -130,10 +130,26 @@ così la garanzia non dipende dalla disciplina di chi scrive il codice:
    un arco fra tenant diversi, quindi né una navigazione di relazione né una
    cancellazione a cascata possono attraversare il confine.
 
-La RLS Postgres del brief §3 resta una possibile quarta rete di sicurezza, da
-valutare quando il servizio avrà connessioni non applicative. `user_id` per
-tabella non è stato introdotto: in MVP ogni mandante ha un solo account
-operativo (PRD Gestione utenze §5).
+4. **RLS Postgres** (`irec/adapters/db/rls.py`, da M2): policy per tabella su
+   `current_setting('irec.tenant_id')`, impostata a inizio transazione.
+   Fail-closed (variabile assente → nessuna riga) e attiva anche per il
+   proprietario delle tabelle (`FORCE`). Copre le query scritte fuori dal
+   repository. In produzione il servizio si connette con un ruolo non
+   privilegiato: i superuser bypassano la RLS.
+
+In più, una regola di lint (ruff TID251) vieta gli import di SQLAlchemy fuori
+da `irec/adapters/db/`: il layering è verificato dalla CI, non affidato alla
+disciplina. `user_id` per tabella non è stato introdotto: in MVP ogni mandante
+ha un solo account operativo (PRD Gestione utenze §5).
+
+### Convenzione di naming
+
+Il **dominio finanziario è in italiano** (`fattura`, `sollecito`, `residuo`,
+`mandante`, `posizione`: i termini del PRD, che non hanno traduzione senza
+perdita); l'**infrastruttura è in inglese** (`select`, `add`, `flush`,
+`delete_tenant_data`, `log_event`, `_find_key`). Nei payload API: campi di
+dominio in italiano, campi di protocollo/envelope in inglese (`run_id`,
+`status`, `error`).
 
 - Audit trail: ogni comunicazione (data/ora, canale, operatore, esito recapito),
   ogni transizione di stato, ogni azione manuale. Storico immutabile.

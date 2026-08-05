@@ -133,7 +133,8 @@ successiva.
 |---|---|---|
 | M0 — Fondazioni | ✅ | [2026-08-05-M0.md](reviews/2026-08-05-M0.md) — R0 e R1 eseguiti |
 | M1 — Modello dati | ✅ | [2026-08-05-M1.md](reviews/2026-08-05-M1.md) — R2 eseguito |
-| M2 — Adapter mock | ▶️ prossima | — |
+| M2 — Adapter mock | ✅ | [2026-08-05-M2.md](reviews/2026-08-05-M2.md) |
+| M3 — Ciclo giornaliero | ▶️ prossima | — |
 
 ## Fase 2 (fuori perimetro MVP)
 

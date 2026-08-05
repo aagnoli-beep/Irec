@@ -4,19 +4,21 @@ Tutto il codice applicativo deve passare da `TenantRepository`: il
 `tenant_id` arriva dal call-token e viene applicato a ogni lettura,
 scrittura e cancellazione. È la "RLS di IREC" (brief §2-§3).
 
-L'isolamento poggia su tre livelli indipendenti:
+L'isolamento poggia su quattro livelli indipendenti:
 1. le query del repository, filtrate per tenant;
 2. il guard `before_flush` di questo modulo, che rifiuta ogni riga in
    uscita verso un tenant diverso — anche se il `tenant_id` è stato
    alterato dopo l'`add()` o su un'entità già caricata;
 3. le foreign key composite `(tenant_id, id)` dello schema, che rendono
-   impossibile a livello di database un arco fra tenant diversi.
+   impossibile a livello di database un arco fra tenant diversi;
+4. le policy RLS di Postgres (`irec/adapters/db/rls.py`), che filtrano
+   anche le query scritte fuori da queste regole.
 """
 
-from typing import TypeVar
+from typing import Any, TypeVar, cast
 
-from sqlalchemy import Select, delete, event, inspect, select
-from sqlalchemy.orm import Session
+from sqlalchemy import Connection, CursorResult, Select, delete, event, inspect, select, text
+from sqlalchemy.orm import Session, SessionTransaction
 
 from irec.adapters.db.models import (
     AuditLog,
@@ -31,6 +33,7 @@ from irec.adapters.db.models import (
     Posizione,
     TenantScoped,
 )
+from irec.adapters.db.rls import RLS_TENANT_SETTING
 from irec.domain.enums import TipoEvento
 
 ModelT = TypeVar("ModelT", bound=TenantScoped)
@@ -67,8 +70,28 @@ class TenantViolation(PermissionError):
     """Tentativo di scrivere o spostare dati fuori dal tenant del call-token."""
 
 
+@event.listens_for(Session, "after_begin")
+def _imposta_tenant_rls(
+    session: Session, transaction: SessionTransaction, connection: Connection
+) -> None:
+    """Comunica il tenant a Postgres per le policy RLS (quarta rete).
+
+    `set_config(..., true)` è locale alla transazione: al commit/rollback
+    la variabile decade da sola, nessun leak fra richieste che riusano la
+    stessa connessione dal pool.
+    """
+    tenant = session.info.get(TENANT_SESSION_KEY)
+    if tenant and connection.dialect.name == "postgresql":
+        connection.execute(
+            text("SELECT set_config(:chiave, :tenant, true)"),
+            {"chiave": RLS_TENANT_SETTING, "tenant": tenant},
+        )
+
+
 @event.listens_for(Session, "before_flush")
-def _blocca_scritture_fuori_tenant(session: Session, flush_context, instances) -> None:
+def _blocca_scritture_fuori_tenant(
+    session: Session, flush_context: object, instances: object
+) -> None:
     """Ultima barriera prima del flush: nessuna riga esce verso un altro tenant.
 
     Copre i casi che il controllo in `add()` non vede: `tenant_id`
@@ -84,7 +107,10 @@ def _blocca_scritture_fuori_tenant(session: Session, flush_context, instances) -
             raise TenantViolation(
                 "scrittura fuori dal tenant del call-token"
             )
-        storico = inspect(entita).attrs.tenant_id.history
+        stato_orm = inspect(entita)
+        if stato_orm is None:  # pragma: no cover - inspect su entità mappata
+            continue
+        storico = stato_orm.attrs.tenant_id.history
         if storico.deleted and storico.deleted[0] != atteso:
             raise TenantViolation("il tenant_id di una riga esistente non è modificabile")
 
@@ -135,7 +161,7 @@ class TenantRepository:
         self._session.add(entity)
         return entity
 
-    def log_evento(
+    def log_event(
         self,
         tipo: TipoEvento,
         entita: str,
@@ -165,7 +191,7 @@ class TenantRepository:
         """Rende visibili gli id generati senza chiudere la transazione."""
         self._session.flush()
 
-    def cancella_tenant(self) -> dict[str, int]:
+    def delete_tenant_data(self) -> dict[str, int]:
         """Cancellazione GDPR di tutti i dati del tenant.
 
         Restituisce il conteggio per tabella. È l'unica operazione che
@@ -173,8 +199,11 @@ class TenantRepository:
         """
         conteggi: dict[str, int] = {}
         for model in _ORDINE_CANCELLAZIONE:
-            result = self._session.execute(
-                delete(model).where(model.tenant_id == self._tenant_id)
+            result = cast(
+                CursorResult[Any],
+                self._session.execute(
+                    delete(model).where(model.tenant_id == self._tenant_id)
+                ),
             )
             conteggi[model.__tablename__] = result.rowcount or 0
         return conteggi

@@ -62,7 +62,8 @@ Migrazioni del database (richiede `IREC_DATABASE_URL`):
 
 - ✅ **M0 — Fondazioni**: scaffold FastAPI, auth call-token via JWKS (aud/exp/entitlement/tenant), logging JSON con `x-correlation-id`, errori `{error, code}`, `/health` + `/ready`, Docker, CI.
 - ✅ **M1 — Modello dati e persistenza**: schema Postgres delle entità del PRD con migrazioni Alembic, repository con isolamento per tenant, audit trail, cancellazione GDPR (`DELETE /v1/tenant`), `/ready` che verifica il database. Include il backlog di hardening R1 della review M0.
-- ▶️ Prossima: **M2 — Adapter dei microservizi esterni (mock-first)** (vedi [docs/ROADMAP.md](docs/ROADMAP.md)).
+- ✅ **M2 — Adapter dei microservizi esterni (mock-first)**: porte in [irec/domain/porte.py](irec/domain/porte.py) (`FattureProvider`, `MovimentiProvider`, `Riconciliatore`) e mock pilotabili per scenario in [irec/adapters/mock/](irec/adapters/mock/) (collegamenti caduti, latenza SDI, pagamenti parziali, bonifici cumulativi, duplicati). Più RLS Postgres come quarta rete di isolamento, lint di layering, mypy strict e coverage in CI.
+- ▶️ Prossima: **M3 — Ciclo giornaliero di sincronizzazione** (vedi [docs/ROADMAP.md](docs/ROADMAP.md)).
 
 Decisioni ancora aperte (vedi [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), sezione "Punti aperti"):
 
