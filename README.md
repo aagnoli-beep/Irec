@@ -13,6 +13,8 @@ Sviluppo e deploy sono completamente separati da Mind: repo, database e runtime 
 |---|---|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Architettura, componenti esterni, flusso principale, vincoli di integrazione |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Piano di sviluppo in milestone (M0–M8 + fase 2) |
+| [CHANGELOG.md](CHANGELOG.md) | Modifiche al contratto `/v1` e al servizio |
+| [docs/reviews/](docs/reviews/) | Report del quality gate e sub-piani di remediation |
 | [openapi.yaml](openapi.yaml) | **Bozza** del contratto API `/v1` verso Mind (fonte di verità dell'integrazione, da concordare) |
 
 ## Stack
@@ -40,10 +42,17 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 docker compose up         # servizio + Postgres locale
 ```
 
+Migrazioni del database (richiede `IREC_DATABASE_URL`):
+
+```bash
+.venv/bin/alembic upgrade head
+```
+
 ## Stato del progetto
 
 - ✅ **M0 — Fondazioni**: scaffold FastAPI, auth call-token via JWKS (aud/exp/entitlement/tenant), logging JSON con `x-correlation-id`, errori `{error, code}`, `/health` + `/ready`, Docker, CI.
-- ▶️ Prossima: **M1 — Modello dati e persistenza** (vedi [docs/ROADMAP.md](docs/ROADMAP.md)).
+- ✅ **M1 — Modello dati e persistenza**: schema Postgres delle entità del PRD con migrazioni Alembic, repository con isolamento per tenant, audit trail, cancellazione GDPR (`DELETE /v1/tenant`), `/ready` che verifica il database. Include il backlog di hardening R1 della review M0.
+- ▶️ Prossima: **M2 — Adapter dei microservizi esterni (mock-first)** (vedi [docs/ROADMAP.md](docs/ROADMAP.md)).
 
 Decisioni ancora aperte (vedi [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), sezione "Punti aperti"):
 

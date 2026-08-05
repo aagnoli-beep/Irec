@@ -1,5 +1,14 @@
 # IREC — Brief architetturale (microservizio-agente per Mind)
 
+> **Nota di validità.** Questo documento è il contratto dei guardrail
+> architetturali (confine con Mind, auth, isolamento tenant, contract-first,
+> layering, resilienza) e resta pienamente vincolante su quei punti.
+> Dove descrive il *perimetro funzionale* è stato superato da
+> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): in particolare ingestion,
+> recupero dati e riconciliazione **non** sono implementati da IREC ma da tre
+> microservizi esterni che IREC orchestra. In caso di divergenza sul
+> perimetro prevale ARCHITECTURE.md; sui guardrail prevale questo documento.
+
 > IREC = *Incassi/pagamenti REconciliation + Crediti*: riconciliazione incassi↔pagamenti,
 > stato fatture (incassate / pagate / scadute), aging, supporto recupero crediti.
 > Sarà un "agente" attivabile/disattivabile per abbonamento dentro **Mind**, ma

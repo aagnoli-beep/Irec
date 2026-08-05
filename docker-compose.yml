@@ -7,7 +7,7 @@ services:
       - "8000:8000"
     environment:
       IREC_JWKS_URL: ${IREC_JWKS_URL:-}
-      IREC_DATABASE_URL: postgresql://irec:irec@db:5432/irec
+      IREC_DATABASE_URL: postgresql+psycopg://irec:${IREC_DB_PASSWORD:-irec_dev_only}@db:5432/irec
       IREC_LOG_LEVEL: ${IREC_LOG_LEVEL:-INFO}
     depends_on:
       - db
@@ -16,10 +16,12 @@ services:
     image: postgres:16
     environment:
       POSTGRES_USER: irec
-      POSTGRES_PASSWORD: irec
+      POSTGRES_PASSWORD: ${IREC_DB_PASSWORD:-irec_dev_only}
       POSTGRES_DB: irec
     ports:
-      - "5432:5432"
+      # Solo loopback: il DB di sviluppo non deve essere raggiungibile
+      # dalla rete a cui è connessa la macchina.
+      - "127.0.0.1:5432:5432"
     volumes:
       - irec_pgdata:/var/lib/postgresql/data
 

@@ -4,7 +4,14 @@ WORKDIR /app
 
 COPY pyproject.toml ./
 COPY irec ./irec
+COPY migrations ./migrations
+COPY alembic.ini ./
 RUN pip install --no-cache-dir .
+
+# Utente non privilegiato: una compromissione del processo non deve
+# ottenere root nel container.
+RUN useradd --system --no-create-home irec
+USER irec
 
 EXPOSE 8000
 

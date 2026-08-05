@@ -1,4 +1,5 @@
 import logging
+import re
 import uuid
 
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
@@ -8,6 +9,10 @@ from starlette.responses import JSONResponse, Response
 from irec.logging_setup import correlation_id_var
 
 CORRELATION_HEADER = "x-correlation-id"
+
+# L'header arriva anche da richieste non autenticate e finisce nei log:
+# vincolato a un formato innocuo e a una lunghezza massima.
+_CORRELATION_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
 logger = logging.getLogger("irec")
 
@@ -21,7 +26,10 @@ class CorrelationIdMiddleware(BaseHTTPMiddleware):
     """
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
-        correlation_id = request.headers.get(CORRELATION_HEADER) or uuid.uuid4().hex
+        ricevuto = request.headers.get(CORRELATION_HEADER)
+        correlation_id = (
+            ricevuto if ricevuto and _CORRELATION_PATTERN.match(ricevuto) else uuid.uuid4().hex
+        )
         token = correlation_id_var.set(correlation_id)
         try:
             response = await call_next(request)

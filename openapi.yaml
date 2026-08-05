@@ -124,6 +124,33 @@ paths:
               schema:
                 $ref: '#/components/schemas/AgingReport'
 
+  /tenant:
+    delete:
+      operationId: deleteTenant
+      summary: Cancellazione GDPR dei dati del tenant del call-token
+      description: >-
+        Cancella tutti i dati del tenant identificato dal call-token.
+        Non è possibile cancellare i dati di un altro tenant.
+      parameters:
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: Dati del tenant cancellati
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tenant_cancellato: { type: boolean }
+                  righe_cancellate:
+                    type: object
+                    additionalProperties: { type: integer }
+              example:
+                tenant_cancellato: true
+                righe_cancellate: { fattura: 12, comunicazione: 34 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/EntitlementError' }
+
   /usage:
     get:
       operationId: getUsage
@@ -211,6 +238,20 @@ components:
   responses:
     BadRequest:
       description: Richiesta non valida
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: >-
+        Call-token assente o non valido. `code`: missing_token, invalid_token,
+        token_expired, invalid_audience, unknown_key, missing_tenant.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ServiceUnavailable:
+      description: >-
+        Dipendenza non disponibile. `code`: auth_not_configured,
+        jwks_unavailable, database_not_configured.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }

@@ -10,6 +10,10 @@ ALLOWED_ALGORITHMS = ["RS256", "RS384", "RS512", "ES256", "ES384"]
 
 JWKS_CACHE_TTL_SECONDS = 300
 JWKS_FETCH_TIMEOUT_SECONDS = 5.0
+# Un kid sconosciuto può forzare un refresh, ma non più spesso di così:
+# altrimenti token con kid casuali diventerebbero un amplificatore di
+# richieste verso l'endpoint JWKS di Mind.
+JWKS_FORCED_REFRESH_MIN_INTERVAL_SECONDS = 60.0
 
 # Il JWKS è l'ancora di fiducia dell'intera auth: su HTTP un MITM potrebbe
 # servire chiavi proprie e forgiare token validi per qualunque tenant.
@@ -49,20 +53,31 @@ class CallTokenVerifier:
         self._audience = audience
         self._cached_jwks: dict | None = None
         self._cached_at: float = 0.0
+        self._ultimo_refresh_forzato: float = 0.0
 
-    def _jwks(self) -> dict:
+    def _fetch_jwks(self) -> dict:
+        try:
+            response = httpx.get(self._jwks_url, timeout=JWKS_FETCH_TIMEOUT_SECONDS)
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise AuthError("jwks_unavailable", "cannot fetch JWKS") from exc
+        self._cached_jwks = response.json()
+        self._cached_at = time.monotonic()
+        return self._cached_jwks
+
+    def _jwks(self, force_refresh: bool = False) -> dict:
         if self._static_jwks is not None:
             return self._static_jwks
-        now = time.monotonic()
-        if self._cached_jwks is None or now - self._cached_at > JWKS_CACHE_TTL_SECONDS:
-            try:
-                response = httpx.get(self._jwks_url, timeout=JWKS_FETCH_TIMEOUT_SECONDS)
-                response.raise_for_status()
-            except httpx.HTTPError as exc:
-                raise AuthError("jwks_unavailable", "cannot fetch JWKS") from exc
-            self._cached_jwks = response.json()
-            self._cached_at = now
+        scaduta = time.monotonic() - self._cached_at > JWKS_CACHE_TTL_SECONDS
+        if self._cached_jwks is None or scaduta or force_refresh:
+            return self._fetch_jwks()
         return self._cached_jwks
+
+    def _cerca_chiave(self, jwks: dict, kid: str | None):
+        for key in jwks.get("keys", []):
+            if key.get("kid") == kid:
+                return jwt.PyJWK.from_dict(key).key
+        return None
 
     def _signing_key(self, token: str) -> "jwt.algorithms.AllowedPublicKeys":
         try:
@@ -70,10 +85,26 @@ class CallTokenVerifier:
         except jwt.InvalidTokenError as exc:
             raise AuthError("invalid_token", "malformed token") from exc
         kid = header.get("kid")
-        for key in self._jwks().get("keys", []):
-            if key.get("kid") == kid:
-                return jwt.PyJWK.from_dict(key).key
+
+        key = self._cerca_chiave(self._jwks(), kid)
+        if key is not None:
+            return key
+
+        # Kid sconosciuto con cache ancora valida: può essere una rotazione
+        # delle chiavi di Mind. Un solo refresh forzato, rate-limitato, prima
+        # di rifiutare — altrimenti si resterebbe in 401 fino a scadenza cache.
+        if self._static_jwks is None and self._puo_rinfrescare():
+            self._ultimo_refresh_forzato = time.monotonic()
+            key = self._cerca_chiave(self._jwks(force_refresh=True), kid)
+            if key is not None:
+                return key
         raise AuthError("unknown_key", "no matching key in JWKS")
+
+    def _puo_rinfrescare(self) -> bool:
+        return (
+            time.monotonic() - self._ultimo_refresh_forzato
+            > JWKS_FORCED_REFRESH_MIN_INTERVAL_SECONDS
+        )
 
     def verify(self, token: str) -> dict:
         key = self._signing_key(token)

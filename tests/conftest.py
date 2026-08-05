@@ -8,7 +8,12 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import Depends
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, text
+from sqlalchemy.pool import StaticPool
 
+from irec.adapters.db.models import Base
+from irec.adapters.db.repository import TenantRepository
+from irec.adapters.db.session import create_session_factory, session_scope
 from irec.auth.context import CallContext, get_call_context
 from irec.auth.verifier import CallTokenVerifier
 from irec.config import Settings
@@ -67,9 +72,40 @@ def make_token(rsa_key):
 
 
 @pytest.fixture
-def app(jwks):
+def db_engine():
+    """Database di test reale (SQLite in memoria), non un mock della sessione."""
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    with engine.connect() as connection:
+        # SQLite ignora le FK se non abilitate: senza questo il test della
+        # cancellazione a cascata non proverebbe nulla.
+        connection.execute(text("PRAGMA foreign_keys=ON"))
+    Base.metadata.create_all(engine)
+    yield engine
+    engine.dispose()
+
+
+@pytest.fixture
+def session_factory(db_engine):
+    return create_session_factory(db_engine)
+
+
+@pytest.fixture
+def repo(session_factory):
+    """Repository sul tenant di default dei token di test."""
+    with session_scope(session_factory) as session:
+        yield TenantRepository(session, "tenant-abc")
+
+
+@pytest.fixture
+def app(jwks, db_engine, session_factory):
     application = create_app(Settings(jwks_url=None, database_url=None))
     application.state.verifier = CallTokenVerifier(static_jwks=jwks, audience="irec")
+    application.state.engine = db_engine
+    application.state.session_factory = session_factory
 
     # Rotta protetta di prova: espone il CallContext per verificare l'auth end-to-end.
     @application.get("/v1/_whoami")
