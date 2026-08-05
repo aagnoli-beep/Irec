@@ -15,6 +15,7 @@ L'isolamento poggia su quattro livelli indipendenti:
    anche le query scritte fuori da queste regole.
 """
 
+from collections.abc import Sequence
 from typing import Any, TypeVar, cast
 
 from sqlalchemy import Connection, CursorResult, Select, delete, event, inspect, select, text
@@ -163,6 +164,19 @@ class TenantRepository:
     def list(self, model: type[ModelT]) -> list[ModelT]:
         """Tutte le righe del modello appartenenti al tenant."""
         return list(self._session.scalars(self.select(model)))
+
+    def find(self, model: type[ModelT], *criteri: object) -> Sequence[ModelT]:
+        # Sequence, non list: nel corpo della classe il nome `list` risolve
+        # al metodo omonimo definito sopra, non al builtin.
+        """Come `list`, con criteri aggiuntivi — sempre filtrata per tenant.
+
+        Evita i full-scan lato Python: i criteri arrivano al database e
+        usano gli indici (es. la chiave di idempotenza delle run).
+        """
+        query = self.select(model)
+        for criterio in criteri:
+            query = query.where(criterio)  # type: ignore[arg-type]
+        return self._session.scalars(query).all()
 
     def add(self, entity: ModelT) -> ModelT:
         """Inserisce forzando il tenant del repository.

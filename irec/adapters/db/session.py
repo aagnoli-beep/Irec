@@ -3,7 +3,13 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 from sqlalchemy import Engine, create_engine, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
+
+# Ri-esportata per i layer superiori (che non possono importare SQLAlchemy):
+# serve a gestire i conflitti sui vincoli di unicità, es. i retry
+# concorrenti sull'Idempotency-Key.
+__all__ = ["IntegrityError", "SessionFactory"]
 
 logger = logging.getLogger("irec.db")
 

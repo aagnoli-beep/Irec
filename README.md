@@ -57,7 +57,9 @@ anche in locale su Postgres:
 IREC_TEST_DATABASE_URL=postgresql+psycopg://postgres:test@127.0.0.1:5432/irec_test .venv/bin/pytest
 ```
 
-Migrazioni del database (richiede `IREC_DATABASE_URL`):
+Migrazioni del database (richiede `IREC_DATABASE_URL`). Attenzione: le
+migrazioni usano l'utente **admin** proprietario delle tabelle (`irec` nel
+compose), non il ruolo applicativo `irec_app` con cui gira il servizio:
 
 ```bash
 .venv/bin/alembic upgrade head

@@ -13,6 +13,14 @@ modo additivo.
   `GET /v1/reconciliations/{run_id}`; contratto allineato all'esito reale
   della run (conteggi e codici anomalia, `status` `queued/running/
   completed/failed`, esempi inclusi). Un run_id altrui risponde 404.
+- Convenzione di lingua del contratto: envelope in inglese — i campi della
+  run sono `result`/`error` (era `risultato`/`errore`); il dominio dentro
+  `result` resta in italiano.
+- `POST /v1/reconciliations`: `409 run_in_progress` con una run attiva per
+  il tenant; `Idempotency-Key` limitata a 128 caratteri
+  (`400 invalid_idempotency_key`); race di retry concorrenti risolta con la
+  stessa run. 403 dichiarato anche sul GET; `providers_not_configured` nel
+  catalogo dei 503.
 
 - `DELETE /v1/tenant` richiede lo scope `irec.tenant.delete` e dichiara il
   `503`; documentato il `code` `scope_missing` fra gli errori 403.

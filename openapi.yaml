@@ -71,6 +71,13 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/EntitlementError' }
+        '409':
+          description: >-
+            Una run QUEUED/RUNNING è già in corso per il tenant.
+            `code`: run_in_progress.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
 
   /reconciliations/{run_id}:
@@ -96,8 +103,8 @@ paths:
               example:
                 run_id: "0f8a1c2d3e4b5a697887a6b5c4d3e2f1"
                 status: completed
-                errore: null
-                risultato:
+                error: null
+                result:
                   collegamento_ade: attivo
                   consenso_psd2: attivo
                   fatture_recuperate: 4
@@ -111,6 +118,7 @@ paths:
                   posizioni_chiuse: 1
                   anomalie: ["fattura_gia_scaduta:32-FA"]
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/EntitlementError' }
         '404': { $ref: '#/components/responses/NotFound' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
 
@@ -271,11 +279,13 @@ components:
       name: Idempotency-Key
       in: header
       required: true
-      schema: { type: string }
+      schema: { type: string, minLength: 1, maxLength: 128 }
 
   responses:
     BadRequest:
-      description: Richiesta non valida
+      description: >-
+        Richiesta non valida. `code`: validation_error,
+        missing_idempotency_key, invalid_idempotency_key (oltre 128 caratteri).
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -289,7 +299,8 @@ components:
     ServiceUnavailable:
       description: >-
         Dipendenza non disponibile. `code`: auth_not_configured,
-        jwks_unavailable, database_not_configured, database_unreachable.
+        jwks_unavailable, database_not_configured, database_unreachable,
+        providers_not_configured.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
@@ -340,14 +351,15 @@ components:
         status:
           type: string
           enum: [queued, running, completed, failed]
-        errore:
+        error:
           type: [string, 'null']
           description: Tipo dell'errore (mai dettagli interni), solo per status=failed.
-        risultato:
+        result:
           type: [object, 'null']
           description: >-
             Riepilogo della run: conteggi, stati dei collegamenti e codici
-            anomalia. Nessun dato personale.
+            anomalia (`mandante_non_censito`, `fattura_gia_scaduta:<numero>`,
+            `pagamento_senza_fattura:<id_movimento>`). Nessun dato personale.
           properties:
             collegamento_ade: { type: string }
             consenso_psd2: { type: string }

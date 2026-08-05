@@ -36,8 +36,7 @@ def build_providers(settings: Settings) -> ProviderSet:
             movimenti=MockBanca(scenari, oggi=oggi),
             riconciliatore=MockRiconciliatore(),
         )
-    if settings.providers == "reali":
-        raise NotImplementedError(
-            "adapter reali dei microservizi non ancora implementati (M8)"
-        )
-    raise ValueError(f"IREC_PROVIDERS sconosciuto: {settings.providers!r}")
+    # L'unico altro valore ammesso dal Literal della config è "reali".
+    raise NotImplementedError(
+        "adapter reali dei microservizi non ancora implementati (M8)"
+    )

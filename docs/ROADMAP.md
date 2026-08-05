@@ -44,7 +44,7 @@ dalle interfacce, mai da un client concreto.
 
 ## M3 — Ciclo giornaliero di sincronizzazione
 
-Job schedulato per tenant: verifica collegamenti → recupero fatture e
+Ciclo per tenant: verifica collegamenti → recupero fatture e
 movimenti → invio al riconciliatore → applicazione esiti (Saldata + annullo
 solleciti residui; parziale con residuo aggiornato; nuove fatture → posizione
 + schedule; posizione chiusa). Idempotenza pagamenti (manuale vs
@@ -53,6 +53,12 @@ riconciliazione automatica, no doppio conteggio). Run asincrone con `run_id`.
 ✅ *Fatta quando:* test end-to-end sul ciclo con i mock: da "nuova fattura nel
 cassetto" a "fattura a sistema con schedule", e da "movimento in banca" a
 "fattura saldata con solleciti annullati".
+
+*Nota (esito M3):* il ciclo parte on-demand via `POST /v1/reconciliations`
+(tool di Mind o operatore). La schedulazione automatica quotidiana — chi
+invoca il ciclo ogni giorno per ogni tenant — sarà definita con
+l'infrastruttura di deploy (M8): cron esterno, scheduler della piattaforma o
+job interno.
 
 ## M4 — Motore solleciti
 
@@ -134,7 +140,7 @@ successiva.
 | M0 — Fondazioni | ✅ | [2026-08-05-M0.md](reviews/2026-08-05-M0.md) — R0 e R1 eseguiti |
 | M1 — Modello dati | ✅ | [2026-08-05-M1.md](reviews/2026-08-05-M1.md) — R2 eseguito |
 | M2 — Adapter mock | ✅ | [2026-08-05-M2.md](reviews/2026-08-05-M2.md) — R4 eseguito |
-| M3 — Ciclo giornaliero | ✅ | [2026-08-05-M3.md](reviews/2026-08-05-M3.md) |
+| M3 — Ciclo giornaliero | ✅ | [2026-08-05-M3.md](reviews/2026-08-05-M3.md) — R6 eseguito |
 | M4 — Motore solleciti | ▶️ prossima | — |
 
 ## Fase 2 (fuori perimetro MVP)

@@ -129,6 +129,119 @@ class TestImportFatture:
         assert esito.fatture_importate == 0
 
 
+class TestDifeseVersoIlRiconciliatore:
+    def test_pagamento_su_fattura_inesistente_e_anomalia(self, session_factory):
+        """Un riconciliatore che restituisce abbinamenti spuri non deve
+        produrre pagamenti: anomalia segnalata, dati intatti."""
+        from irec.domain.porte import EsitoRiconciliazione, PagamentoRilevato
+
+        class RiconciliatoreSpurio:
+            def riconcilia(self, fatture, movimenti):
+                return EsitoRiconciliazione(
+                    pagamenti=(
+                        PagamentoRilevato(
+                            numero_fattura="INESISTENTE",
+                            piva_cf_debitore="00000000000",
+                            id_movimento="mov-spurio",
+                            importo_pagato=Decimal("1.00"),
+                        ),
+                    ),
+                    fatture_da_pagare=tuple(fatture),
+                    movimenti_non_riconciliati=(),
+                )
+
+        base = scenario_demo(OGGI)
+        scenario = ScenarioTenant(fatture=base.fatture[:1], movimenti=base.movimenti[:1])
+        prepara_mandante(session_factory)
+        scenari = {TENANT: scenario}
+        ciclo = CicloSincronizzazione(
+            MockCassettoFiscale(scenari, oggi=OGGI),
+            MockBanca(scenari, oggi=OGGI),
+            RiconciliatoreSpurio(),
+            oggi=OGGI,
+            lookback_giorni=60,
+        )
+        with session_scope(session_factory) as session:
+            esito = ciclo.esegui(TenantRepository(session, TENANT))
+
+        # (32-FA è anche già scaduta a OGGI: l'anomalia di import è attesa.)
+        assert "pagamento_senza_fattura:mov-spurio" in esito.anomalie
+        assert esito.pagamenti_registrati == 0
+        with session_scope(session_factory) as session:
+            assert TenantRepository(session, TENANT).list(Pagamento) == []
+
+    def test_fattura_duplicata_nello_stesso_lotto_importata_una_volta(
+        self, session_factory
+    ):
+        fattura = scenario_demo(OGGI).fatture[0]
+        scenario = ScenarioTenant(fatture=[fattura, fattura])
+        prepara_mandante(session_factory)
+        esito = esegui(session_factory, scenario)
+
+        assert esito.fatture_importate == 1
+        assert esito.comunicazioni_programmate == len(FLUSSO_DEFAULT)
+        with session_scope(session_factory) as session:
+            assert len(TenantRepository(session, TENANT).list(Fattura)) == 1
+
+    def test_pagamento_manuale_preesistente_non_fa_fallire_la_run(
+        self, session_factory
+    ):
+        """Il dedup sulle chiavi: un incasso già registrato a mano non
+        viene contato di nuovo e non manda la run in errore."""
+        from datetime import date as date_type
+
+        from irec.adapters.db.models import Fattura as FatturaDb
+        from irec.domain.enums import OriginePagamento
+        from tests.factories import make_pagamento
+
+        base = scenario_demo(OGGI)
+        fattura_32 = base.fatture[0]
+        scenario = ScenarioTenant(
+            fatture=[fattura_32], movimenti=[base.movimenti[0]]  # mov-001 la salda
+        )
+        prepara_mandante(session_factory)
+        esegui(session_factory, ScenarioTenant(fatture=[fattura_32]))  # solo import
+
+        with session_scope(session_factory) as session:
+            repo = TenantRepository(session, TENANT)
+            fattura = repo.list(FatturaDb)[0]
+            repo.add(
+                make_pagamento(
+                    fattura.id,
+                    importo=Decimal("1220.00"),
+                    data_pagamento=date_type(2026, 8, 1),
+                    origine=OriginePagamento.MANUALE,
+                    chiave_idempotenza="mov-001:32-FA",
+                )
+            )
+            fattura.importo_residuo = Decimal("0.00")
+            fattura.stato = StatoFattura.SALDATA
+
+        esito = esegui(session_factory, scenario)
+        assert esito.pagamenti_registrati == 0
+        assert esito.anomalie == []
+        with session_scope(session_factory) as session:
+            assert len(TenantRepository(session, TENANT).list(Pagamento)) == 1
+
+    def test_tenant_ignoto_al_servizio_esterno_e_stato_non_configurato(
+        self, session_factory
+    ):
+        """ErroreCollegamento dalle porte di stato → esito, non eccezione."""
+        prepara_mandante(session_factory)
+        ciclo = CicloSincronizzazione(
+            MockCassettoFiscale({}, oggi=OGGI),
+            MockBanca({}, oggi=OGGI),
+            MockRiconciliatore(),
+            oggi=OGGI,
+        )
+        with session_scope(session_factory) as session:
+            esito = ciclo.esegui(TenantRepository(session, TENANT))
+
+        assert esito.collegamento_ade == StatoCollegamento.NON_CONFIGURATO
+        assert esito.consenso_psd2 == StatoCollegamento.NON_CONFIGURATO
+        assert esito.fatture_importate == 0
+
+
 class TestCollegamentiCaduti:
     def test_delega_ade_caduta_non_importa_nulla(self, session_factory, scenario):
         scenario.collegamento_ade = CollegamentoEsterno(

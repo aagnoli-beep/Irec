@@ -164,9 +164,17 @@ class CicloSincronizzazione:
             return
 
         flusso = self._flusso_default(repo, mandante)
+        # Stato del tenant caricato UNA volta prima del loop e aggiornato
+        # incrementalmente: niente full-scan per ogni fattura del lotto.
         clienti = {cliente.piva_cf: cliente for cliente in repo.list(ClienteFinale)}
         esistenti = {
             (fattura.cliente_id, fattura.numero) for fattura in repo.list(Fattura)
+        }
+        posizioni_aperte = {
+            posizione.cliente_id: posizione
+            for posizione in repo.find(
+                Posizione, Posizione.stato == StatoPosizione.APERTA
+            )
         }
 
         for esterna in fatture:
@@ -189,7 +197,11 @@ class CicloSincronizzazione:
             if (cliente.id, esterna.numero) in esistenti:
                 continue  # reimport: già a sistema
 
-            posizione = self._posizione_aperta(repo, cliente)
+            posizione = posizioni_aperte.get(cliente.id)
+            if posizione is None:
+                posizione = repo.add(Posizione(cliente_id=cliente.id))
+                repo.flush()
+                posizioni_aperte[cliente.id] = posizione
             fattura = repo.add(
                 Fattura(
                     posizione_id=posizione.id,
@@ -243,19 +255,6 @@ class CicloSincronizzazione:
         repo.flush()
         return flusso
 
-    def _posizione_aperta(
-        self, repo: TenantRepository, cliente: ClienteFinale
-    ) -> Posizione:
-        for posizione in repo.list(Posizione):
-            if (
-                posizione.cliente_id == cliente.id
-                and posizione.stato is StatoPosizione.APERTA
-            ):
-                return posizione
-        posizione = repo.add(Posizione(cliente_id=cliente.id))
-        repo.flush()
-        return posizione
-
     def _programma_schedule(
         self, repo: TenantRepository, flusso: Flusso, fattura: Fattura
     ) -> int:
@@ -304,16 +303,22 @@ class CicloSincronizzazione:
         if not aperte:
             return
 
-        movimenti_residui = self._movimenti_non_ancora_allocati(repo, movimenti)
+        # I pagamenti del tenant, caricati UNA volta per l'intera fase:
+        # servono sia alla riduzione dei movimenti sia al dedup in
+        # _applica_pagamento (che aggiorna il set incrementalmente).
+        pagamenti = repo.list(Pagamento)
+        chiavi_registrate = {pagamento.chiave_idempotenza for pagamento in pagamenti}
+
+        movimenti_residui = self._movimenti_non_ancora_allocati(pagamenti, movimenti)
         if not movimenti_residui:
             return
 
         risultato = self._riconciliatore.riconcilia(aperte, movimenti_residui)
         for pagamento in risultato.pagamenti:
-            self._applica_pagamento(repo, indice, pagamento, esito)
+            self._applica_pagamento(repo, indice, chiavi_registrate, pagamento, esito)
 
     def _movimenti_non_ancora_allocati(
-        self, repo: TenantRepository, movimenti: list[MovimentoBancario]
+        self, pagamenti: list[Pagamento], movimenti: list[MovimentoBancario]
     ) -> list[MovimentoBancario]:
         """Riduce ogni movimento di quanto già registrato nei run precedenti.
 
@@ -322,7 +327,6 @@ class CicloSincronizzazione:
         allocato verrebbe riusato sulle fatture rimaste aperte,
         registrando incassi mai avvenuti.
         """
-        pagamenti = repo.list(Pagamento)
         residui: list[MovimentoBancario] = []
         for movimento in movimenti:
             allocato = sum(
@@ -344,23 +348,18 @@ class CicloSincronizzazione:
         self, repo: TenantRepository
     ) -> tuple[list[FatturaEsterna], dict[tuple[str, str], Fattura]]:
         """Le fatture ancora da incassare, nel formato del riconciliatore."""
-        piva_per_cliente = {
-            cliente.id: cliente.piva_cf for cliente in repo.list(ClienteFinale)
-        }
-        denominazioni = {
-            cliente.id: cliente.denominazione for cliente in repo.list(ClienteFinale)
-        }
+        clienti = {cliente.id: cliente for cliente in repo.list(ClienteFinale)}
         aperte: list[FatturaEsterna] = []
         indice: dict[tuple[str, str], Fattura] = {}
         for fattura in repo.list(Fattura):
             if fattura.stato in (StatoFattura.SALDATA, StatoFattura.INSOLUTO):
                 continue
-            piva = piva_per_cliente[fattura.cliente_id]
+            cliente = clienti[fattura.cliente_id]
             aperte.append(
                 FatturaEsterna(
                     numero=fattura.numero,
-                    piva_cf_debitore=piva,
-                    denominazione_debitore=denominazioni[fattura.cliente_id],
+                    piva_cf_debitore=cliente.piva_cf,
+                    denominazione_debitore=cliente.denominazione,
                     data_emissione=fattura.data_emissione,
                     data_scadenza=fattura.data_scadenza,
                     # Il riconciliatore ragiona sul dovuto residuo, non
@@ -369,13 +368,14 @@ class CicloSincronizzazione:
                     importo=fattura.importo_residuo,
                 )
             )
-            indice[(piva, fattura.numero)] = fattura
+            indice[(cliente.piva_cf, fattura.numero)] = fattura
         return aperte, indice
 
     def _applica_pagamento(
         self,
         repo: TenantRepository,
         indice: dict[tuple[str, str], Fattura],
+        chiavi_registrate: set[str],
         rilevato: PagamentoRilevato,
         esito: EsitoSincronizzazione,
     ) -> None:
@@ -388,11 +388,9 @@ class CicloSincronizzazione:
         # movimento→fattura. Un ri-run della sincronizzazione (o una
         # registrazione manuale dello stesso incasso) non conta due volte.
         chiave = f"{rilevato.id_movimento}:{rilevato.numero_fattura}"
-        gia_registrati = {
-            pagamento.chiave_idempotenza for pagamento in repo.list(Pagamento)
-        }
-        if chiave in gia_registrati:
+        if chiave in chiavi_registrate:
             return
+        chiavi_registrate.add(chiave)
 
         repo.add(
             Pagamento(
@@ -437,8 +435,15 @@ class CicloSincronizzazione:
     def _aggiorna_posizioni(
         self, repo: TenantRepository, esito: EsitoSincronizzazione
     ) -> None:
+        # Stati raggruppati in un passaggio unico: evita il lazy-load N+1
+        # di posizione.fatture dentro il loop.
+        stati_per_posizione: dict[str, list[StatoFattura]] = {}
+        for fattura in repo.list(Fattura):
+            stati_per_posizione.setdefault(fattura.posizione_id, []).append(
+                fattura.stato
+            )
         for posizione in repo.list(Posizione):
-            stati = [fattura.stato for fattura in posizione.fatture]
+            stati = stati_per_posizione.get(posizione.id, [])
             nuovo = stato_posizione(stati)
             if nuovo is StatoPosizione.CHIUSA and posizione.stato is not nuovo:
                 posizione.stato = nuovo
